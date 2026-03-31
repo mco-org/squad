@@ -231,4 +231,66 @@ grep -q "Minimal QR Connect Surface Implementation Plan" "$superpowers_inspector
 grep -q "docs/superpowers/plans/2026-03-30-minimal-qr-connect-surface-implementation.md" "$superpowers_summary"
 grep -q "docs/superpowers/specs/2026-03-30-minimal-qr-connect-surface-design.md" "$superpowers_summary"
 
+custom_discovery_repo="$tmpdir/custom-discovery-repo"
+mkdir -p "$custom_discovery_repo/.squad" "$custom_discovery_repo/workitems/plans" "$custom_discovery_repo/workitems/specifications"
+git -C "$tmpdir" init -b main custom-discovery-repo >/dev/null
+git -C "$custom_discovery_repo" config user.email "codex@example.com"
+git -C "$custom_discovery_repo" config user.name "Codex"
+echo "custom" >"$custom_discovery_repo/README.md"
+git -C "$custom_discovery_repo" add README.md
+git -C "$custom_discovery_repo" commit -m "seed" >/dev/null
+
+cat >"$custom_discovery_repo/.squad/launcher.yaml" <<'EOF'
+project:
+  name: custom-discovery-demo
+
+task_discovery:
+  plan_globs:
+    - workitems/plans/*-plan.md
+  spec_globs:
+    - workitems/specifications/*-spec.md
+  plan_suffix: -plan.md
+  spec_suffix: -spec.md
+EOF
+
+cat >"$custom_discovery_repo/workitems/specifications/2026-03-29-older-flow-spec.md" <<'EOF'
+# Older Flow Spec
+Do not select this spec.
+EOF
+
+cat >"$custom_discovery_repo/workitems/plans/2026-03-29-older-flow-plan.md" <<'EOF'
+# Older Flow Plan
+Do not select this plan.
+EOF
+
+cat >"$custom_discovery_repo/workitems/specifications/2026-03-31-remote-control-gateway-spec.md" <<'EOF'
+# Remote Control Gateway Spec
+
+## Goal
+Keep arbitrary discovery layouts configurable.
+EOF
+
+cat >"$custom_discovery_repo/workitems/plans/2026-03-31-remote-control-gateway-plan.md" <<'EOF'
+# Remote Control Gateway Plan
+
+## Task 1
+Support configurable plan/spec discovery.
+EOF
+
+bash "$launcher" "$custom_discovery_repo" --dry-run --no-setup --no-attach >/dev/null
+
+custom_prompt="$custom_discovery_repo/.squad/quickstart/generated-manager.prompt.md"
+custom_inspector_prompt="$custom_discovery_repo/.squad/quickstart/generated-inspector.prompt.md"
+custom_summary="$custom_discovery_repo/.squad/quickstart/generated-run-summary.md"
+
+test -f "$custom_prompt"
+test -f "$custom_inspector_prompt"
+test -f "$custom_summary"
+grep -q "Remote Control Gateway Plan" "$custom_prompt"
+grep -q "Remote Control Gateway Spec" "$custom_prompt"
+grep -q "Keep arbitrary discovery layouts configurable" "$custom_prompt"
+grep -q "Remote Control Gateway Plan" "$custom_inspector_prompt"
+grep -q "workitems/plans/2026-03-31-remote-control-gateway-plan.md" "$custom_summary"
+grep -q "workitems/specifications/2026-03-31-remote-control-gateway-spec.md" "$custom_summary"
+
 echo "PASS: generic launcher dry-run generated expected files"

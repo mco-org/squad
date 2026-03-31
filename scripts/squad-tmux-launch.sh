@@ -27,8 +27,9 @@ Options:
 Task source priority:
   1. --task-file <path>
   2. <project-dir>/.squad/run-task.md
-  3. latest <project-dir>/docs/superpowers/plans/*-implementation.md
-     plus the newest matching docs/superpowers/specs/*-design.md
+  3. task_discovery.plan_globs / spec_globs from .squad/launcher.yaml
+     or the default docs/superpowers/plans/*-implementation.md
+     plus the newest matching spec
 
 Project config:
   <project-dir>/.squad/launcher.yaml
@@ -194,6 +195,10 @@ emit_scalar("CFG_WORKTREE_LOCATION", lookup(data, "workspace", "worktree", "loca
 emit_scalar("CFG_WORKTREE_PATH", lookup(data, "workspace", "worktree", "path"))
 emit_scalar("CFG_WORKTREE_BRANCH", lookup(data, "workspace", "worktree", "branch"))
 emit_scalar("CFG_WORKTREE_BASE_REF", lookup(data, "workspace", "worktree", "base_ref"))
+emit_array("CFG_TASK_DISCOVERY_PLAN_GLOBS", lookup(data, "task_discovery", "plan_globs"))
+emit_array("CFG_TASK_DISCOVERY_SPEC_GLOBS", lookup(data, "task_discovery", "spec_globs"))
+emit_scalar("CFG_TASK_DISCOVERY_PLAN_SUFFIX", lookup(data, "task_discovery", "plan_suffix"))
+emit_scalar("CFG_TASK_DISCOVERY_SPEC_SUFFIX", lookup(data, "task_discovery", "spec_suffix"))
 emit_array("CFG_FOCUS_FILES", lookup(data, "focus", "files"))
 emit_array("CFG_FOCUS_DOCS", lookup(data, "focus", "docs"))
 emit_array("CFG_CONSTRAINTS", lookup(data, "constraints"))
@@ -209,32 +214,121 @@ latest_matching_doc() {
   find "$dir" -maxdepth 1 -type f -name "$pattern" | LC_ALL=C sort | tail -n 1
 }
 
-superpowers_topic_slug() {
+latest_matching_glob_patterns() {
+  local root="$1"
+  shift
+  [[ -d "$root" ]] || return 1
+  (( $# > 0 )) || return 1
+
+  require_cmd ruby
+
+  ruby - "$root" "$@" <<'RUBY'
+root = ARGV.shift
+patterns = ARGV
+matches = patterns.flat_map { |pattern| Dir.glob(File.join(root, pattern), File::FNM_EXTGLOB) }
+  .select { |path| File.file?(path) }
+  .uniq
+  .sort
+puts matches.last if matches.any?
+RUBY
+}
+
+all_matching_glob_patterns() {
+  local root="$1"
+  shift
+  [[ -d "$root" ]] || return 1
+  (( $# > 0 )) || return 1
+
+  require_cmd ruby
+
+  ruby - "$root" "$@" <<'RUBY'
+root = ARGV.shift
+patterns = ARGV
+matches = patterns.flat_map { |pattern| Dir.glob(File.join(root, pattern), File::FNM_EXTGLOB) }
+  .select { |path| File.file?(path) }
+  .uniq
+  .sort
+puts matches
+RUBY
+}
+
+doc_topic_slug() {
   local file_path="$1"
+  local suffix="$2"
   local name=""
   name="$(basename "$file_path")"
 
-  case "$name" in
-    ????-??-??-*-implementation.md)
-      name="${name#????-??-??-}"
-      printf '%s' "${name%-implementation.md}"
-      ;;
-    ????-??-??-*-design.md)
-      name="${name#????-??-??-}"
-      printf '%s' "${name%-design.md}"
-      ;;
-    *)
-      return 1
-      ;;
-  esac
+  if [[ -n "$suffix" && "$name" == *"$suffix" ]]; then
+    name="${name%"$suffix"}"
+  else
+    name="${name%.md}"
+  fi
+
+  if [[ "$name" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-(.+)$ ]]; then
+    name="${BASH_REMATCH[1]}"
+  fi
+
+  [[ -n "$name" ]] || return 1
+  printf '%s' "$name"
 }
 
-matching_superpowers_spec() {
+matching_spec_from_patterns() {
   local plan_file="$1"
-  local specs_dir="$2"
   local topic_slug=""
-  topic_slug="$(superpowers_topic_slug "$plan_file")" || return 1
-  latest_matching_doc "$specs_dir" "????-??-??-${topic_slug}-design.md"
+  local root="$2"
+  shift 2
+  local -a patterns=("$@")
+  local pattern=""
+  local candidate=""
+  local candidate_slug=""
+  local latest=""
+
+  topic_slug="$(doc_topic_slug "$plan_file" "$task_discovery_plan_suffix")" || return 1
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    candidate_slug="$(doc_topic_slug "$candidate" "$task_discovery_spec_suffix" || true)"
+    if [[ -n "$candidate_slug" && "$candidate_slug" == "$topic_slug" ]]; then
+      latest="$candidate"
+    fi
+  done < <(all_matching_glob_patterns "$root" "${patterns[@]}" 2>/dev/null || true)
+
+  if [[ -n "$latest" ]]; then
+    printf '%s\n' "$latest"
+  else
+    return 1
+  fi
+}
+
+latest_matching_spec_for_plan() {
+  local plan_file="$1"
+  local root="$2"
+
+  if (( ${#task_discovery_spec_globs[@]} > 0 )); then
+    matching_spec_from_patterns "$plan_file" "$root" "${task_discovery_spec_globs[@]}"
+    return
+  fi
+
+  local specs_dir="$root/docs/superpowers/specs"
+  local topic_slug=""
+  topic_slug="$(doc_topic_slug "$plan_file" "$task_discovery_plan_suffix")" || return 1
+  latest_matching_doc "$specs_dir" "????-??-??-${topic_slug}${task_discovery_spec_suffix}"
+}
+
+looks_like_plan_file() {
+  local file_path="$1"
+  local base_name
+  base_name="$(basename "$file_path")"
+  [[ -n "$task_discovery_plan_suffix" && "$base_name" == *"$task_discovery_plan_suffix" ]]
+}
+
+resolve_discovery_candidate() {
+  local root="$1"
+
+  if (( ${#task_discovery_plan_globs[@]} > 0 )); then
+    latest_matching_glob_patterns "$root" "${task_discovery_plan_globs[@]}"
+  else
+    latest_matching_doc "$root/docs/superpowers/plans" "????-??-??-*${task_discovery_plan_suffix}"
+  fi
 }
 
 resolve_task_sources() {
@@ -267,27 +361,27 @@ resolve_task_sources() {
     fi
 
     for root in "${search_roots[@]}"; do
-      candidate="$(latest_matching_doc "$root/docs/superpowers/plans" "????-??-??-*-implementation.md" || true)"
+      candidate="$(resolve_discovery_candidate "$root" || true)"
       if [[ -n "$candidate" ]]; then
         task_source_kind="superpowers-plan"
         task_source_path="$candidate"
-        task_source_root="$root/docs/superpowers"
-        task_supporting_spec_path="$(matching_superpowers_spec "$candidate" "$root/docs/superpowers/specs" || true)"
+        task_source_root="$root"
+        task_supporting_spec_path="$(latest_matching_spec_for_plan "$candidate" "$root" || true)"
         break
       fi
     done
 
     if [[ -z "$task_source_path" ]]; then
       echo "Error: task brief not found: $default_task_file" >&2
-      echo "Provide --task-file <path>, create $default_task_file, or add docs/superpowers/plans/*-implementation.md" >&2
+      echo "Provide --task-file <path>, create $default_task_file, or configure task_discovery.plan_globs in $launcher_config" >&2
       exit 1
     fi
   fi
 
-  if [[ "$task_source_kind" == "task-brief" && "$(basename "$task_source_path")" == ????-??-??-*-implementation.md ]]; then
+  if [[ "$task_source_kind" == "task-brief" ]] && looks_like_plan_file "$task_source_path"; then
     task_source_kind="superpowers-plan"
-    task_source_root="$(cd "$(dirname "$task_source_path")/.." && pwd -P 2>/dev/null || true)"
-    task_supporting_spec_path="$(matching_superpowers_spec "$task_source_path" "$(dirname "$task_source_path")/../specs" || true)"
+    task_source_root="${repo_root:-$project_dir}"
+    task_supporting_spec_path="$(latest_matching_spec_for_plan "$task_source_path" "$task_source_root" || true)"
   fi
 }
 
@@ -636,15 +730,6 @@ source_project_dir="$project_dir"
 launcher_config="$project_dir/.squad/launcher.yaml"
 default_task_file="$project_dir/.squad/run-task.md"
 detected_repo_root="$(git -C "$project_dir" rev-parse --show-toplevel 2>/dev/null || true)"
-task_file=""
-task_source_kind=""
-task_source_path=""
-task_supporting_spec_path=""
-task_source_root=""
-
-resolve_task_sources "$project_dir" "$task_file_override" "$default_task_file" "$detected_repo_root"
-task_file="$task_source_path"
-
 CFG_PROJECT_NAME=""
 CFG_SESSION_NAME=""
 CFG_CLAUDE_COMMAND=""
@@ -659,6 +744,10 @@ CFG_WORKTREE_LOCATION=""
 CFG_WORKTREE_PATH=""
 CFG_WORKTREE_BRANCH=""
 CFG_WORKTREE_BASE_REF=""
+CFG_TASK_DISCOVERY_PLAN_GLOBS=()
+CFG_TASK_DISCOVERY_SPEC_GLOBS=()
+CFG_TASK_DISCOVERY_PLAN_SUFFIX=""
+CFG_TASK_DISCOVERY_SPEC_SUFFIX=""
 CFG_FOCUS_FILES=()
 CFG_FOCUS_DOCS=()
 CFG_CONSTRAINTS=()
@@ -696,9 +785,22 @@ fi
 
 copy_array_or_empty claude_args CFG_CLAUDE_ARGS
 copy_array_or_empty init_args CFG_INIT_ARGS
+copy_array_or_empty task_discovery_plan_globs CFG_TASK_DISCOVERY_PLAN_GLOBS
+copy_array_or_empty task_discovery_spec_globs CFG_TASK_DISCOVERY_SPEC_GLOBS
 copy_array_or_empty focus_files CFG_FOCUS_FILES
 copy_array_or_empty focus_docs CFG_FOCUS_DOCS
 copy_array_or_empty constraints CFG_CONSTRAINTS
+task_discovery_plan_suffix="${CFG_TASK_DISCOVERY_PLAN_SUFFIX:--implementation.md}"
+task_discovery_spec_suffix="${CFG_TASK_DISCOVERY_SPEC_SUFFIX:--design.md}"
+
+task_file=""
+task_source_kind=""
+task_source_path=""
+task_supporting_spec_path=""
+task_source_root=""
+
+resolve_task_sources "$project_dir" "$task_file_override" "$default_task_file" "$detected_repo_root"
+task_file="$task_source_path"
 
 if (( ${#init_args[@]} == 0 )); then
   init_args=(--refresh-roles)
