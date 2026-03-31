@@ -177,4 +177,58 @@ EOF
 HOME="$tmpdir/home" bash "$launcher" "$tilde_repo" --dry-run --no-setup --no-attach >/dev/null
 grep -q "$tmpdir/home/bin/claude --dangerously-skip-permissions" "$tilde_repo/.squad/quickstart/generated-run-summary.md"
 
+superpowers_repo="$tmpdir/superpowers-repo"
+mkdir -p "$superpowers_repo/.squad" "$superpowers_repo/docs/superpowers/specs" "$superpowers_repo/docs/superpowers/plans"
+git -C "$tmpdir" init -b main superpowers-repo >/dev/null
+git -C "$superpowers_repo" config user.email "codex@example.com"
+git -C "$superpowers_repo" config user.name "Codex"
+echo "superpowers" >"$superpowers_repo/README.md"
+git -C "$superpowers_repo" add README.md
+git -C "$superpowers_repo" commit -m "seed" >/dev/null
+
+cat >"$superpowers_repo/.squad/launcher.yaml" <<'EOF'
+project:
+  name: superpowers-demo
+EOF
+
+cat >"$superpowers_repo/docs/superpowers/specs/2026-03-29-older-flow-design.md" <<'EOF'
+# Older Flow Design
+This should not be selected.
+EOF
+
+cat >"$superpowers_repo/docs/superpowers/plans/2026-03-29-older-flow-implementation.md" <<'EOF'
+# Older Flow Implementation Plan
+This should not be selected.
+EOF
+
+cat >"$superpowers_repo/docs/superpowers/specs/2026-03-30-minimal-qr-connect-surface-design.md" <<'EOF'
+# Minimal QR Connect Surface Design
+
+## Goal
+Finish the remaining product-facing QR connection path.
+EOF
+
+cat >"$superpowers_repo/docs/superpowers/plans/2026-03-30-minimal-qr-connect-surface-implementation.md" <<'EOF'
+# Minimal QR Connect Surface Implementation Plan
+
+## Task 1
+Implement the QR connect surface.
+EOF
+
+bash "$launcher" "$superpowers_repo" --dry-run --no-setup --no-attach >/dev/null
+
+superpowers_prompt="$superpowers_repo/.squad/quickstart/generated-manager.prompt.md"
+superpowers_inspector_prompt="$superpowers_repo/.squad/quickstart/generated-inspector.prompt.md"
+superpowers_summary="$superpowers_repo/.squad/quickstart/generated-run-summary.md"
+
+test -f "$superpowers_prompt"
+test -f "$superpowers_inspector_prompt"
+test -f "$superpowers_summary"
+grep -q "Minimal QR Connect Surface Implementation Plan" "$superpowers_prompt"
+grep -q "Minimal QR Connect Surface Design" "$superpowers_prompt"
+grep -q "Finish the remaining product-facing QR connection path" "$superpowers_prompt"
+grep -q "Minimal QR Connect Surface Implementation Plan" "$superpowers_inspector_prompt"
+grep -q "docs/superpowers/plans/2026-03-30-minimal-qr-connect-surface-implementation.md" "$superpowers_summary"
+grep -q "docs/superpowers/specs/2026-03-30-minimal-qr-connect-surface-design.md" "$superpowers_summary"
+
 echo "PASS: generic launcher dry-run generated expected files"

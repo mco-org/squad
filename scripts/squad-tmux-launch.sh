@@ -27,6 +27,8 @@ Options:
 Task source priority:
   1. --task-file <path>
   2. <project-dir>/.squad/run-task.md
+  3. latest <project-dir>/docs/superpowers/plans/*-implementation.md
+     plus the newest matching docs/superpowers/specs/*-design.md
 
 Project config:
   <project-dir>/.squad/launcher.yaml
@@ -199,6 +201,96 @@ RUBY
   )"
 }
 
+latest_matching_doc() {
+  local dir="$1"
+  local pattern="$2"
+  [[ -d "$dir" ]] || return 1
+
+  find "$dir" -maxdepth 1 -type f -name "$pattern" | LC_ALL=C sort | tail -n 1
+}
+
+superpowers_topic_slug() {
+  local file_path="$1"
+  local name=""
+  name="$(basename "$file_path")"
+
+  case "$name" in
+    ????-??-??-*-implementation.md)
+      name="${name#????-??-??-}"
+      printf '%s' "${name%-implementation.md}"
+      ;;
+    ????-??-??-*-design.md)
+      name="${name#????-??-??-}"
+      printf '%s' "${name%-design.md}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+matching_superpowers_spec() {
+  local plan_file="$1"
+  local specs_dir="$2"
+  local topic_slug=""
+  topic_slug="$(superpowers_topic_slug "$plan_file")" || return 1
+  latest_matching_doc "$specs_dir" "????-??-??-${topic_slug}-design.md"
+}
+
+resolve_task_sources() {
+  local project_dir="$1"
+  local task_override="$2"
+  local default_task_file="$3"
+  local repo_root="$4"
+  local candidate=""
+  local root=""
+  local -a search_roots=()
+
+  task_source_kind="task-brief"
+  task_source_path=""
+  task_supporting_spec_path=""
+  task_source_root=""
+
+  if [[ -n "$task_override" ]]; then
+    task_source_path="$task_override"
+    if [[ ! -f "$task_source_path" ]]; then
+      echo "Error: task brief not found: $task_source_path" >&2
+      echo "Provide --task-file <path> or create $default_task_file" >&2
+      exit 1
+    fi
+  elif [[ -f "$default_task_file" ]]; then
+    task_source_path="$default_task_file"
+  else
+    search_roots=("$project_dir")
+    if [[ -n "$repo_root" && "$repo_root" != "$project_dir" ]]; then
+      search_roots+=("$repo_root")
+    fi
+
+    for root in "${search_roots[@]}"; do
+      candidate="$(latest_matching_doc "$root/docs/superpowers/plans" "????-??-??-*-implementation.md" || true)"
+      if [[ -n "$candidate" ]]; then
+        task_source_kind="superpowers-plan"
+        task_source_path="$candidate"
+        task_source_root="$root/docs/superpowers"
+        task_supporting_spec_path="$(matching_superpowers_spec "$candidate" "$root/docs/superpowers/specs" || true)"
+        break
+      fi
+    done
+
+    if [[ -z "$task_source_path" ]]; then
+      echo "Error: task brief not found: $default_task_file" >&2
+      echo "Provide --task-file <path>, create $default_task_file, or add docs/superpowers/plans/*-implementation.md" >&2
+      exit 1
+    fi
+  fi
+
+  if [[ "$task_source_kind" == "task-brief" && "$(basename "$task_source_path")" == ????-??-??-*-implementation.md ]]; then
+    task_source_kind="superpowers-plan"
+    task_source_root="$(cd "$(dirname "$task_source_path")/.." && pwd -P 2>/dev/null || true)"
+    task_supporting_spec_path="$(matching_superpowers_spec "$task_source_path" "$(dirname "$task_source_path")/../specs" || true)"
+  fi
+}
+
 build_manager_prompt() {
   local output_path="$1"
   local project_name="$2"
@@ -255,6 +347,21 @@ build_manager_prompt() {
       echo
     fi
 
+    echo "## Input Sources"
+    echo "- Primary task source: \`$task_source_path\`"
+    if [[ "$task_source_kind" == "superpowers-plan" ]]; then
+      echo "- Primary type: \`implementation-plan\`"
+      if [[ -n "$task_supporting_spec_path" ]]; then
+        echo "- Supporting spec: \`$task_supporting_spec_path\`"
+      fi
+      if [[ -n "$task_source_root" ]]; then
+        echo "- Source root: \`$task_source_root\`"
+      fi
+    else
+      echo "- Primary type: \`task-brief\`"
+    fi
+    echo
+
     cat <<'EOF'
 ## Execution Principles
 - Start with read-only analysis and build a baseline before assigning work.
@@ -264,11 +371,23 @@ build_manager_prompt() {
 - Every completed worker task should be reviewed by the inspector.
 - Do not validate only the happy path; cover failures, fallback behavior, recovery, and regressions.
 - If worktree mode is enabled, all code changes, tests, and commits must happen in `Workspace root`.
-
-## Task Brief
 EOF
     echo
-    cat "$task_file"
+    if [[ "$task_source_kind" == "superpowers-plan" ]]; then
+      echo "## Implementation Plan"
+      echo
+      cat "$task_file"
+      if [[ -n "$task_supporting_spec_path" ]]; then
+        echo
+        echo "## Supporting Spec"
+        echo
+        cat "$task_supporting_spec_path"
+      fi
+    else
+      echo "## Task Brief"
+      echo
+      cat "$task_file"
+    fi
   } >"$output_path"
 }
 
@@ -333,11 +452,23 @@ EOF
       echo
     fi
 
-    cat <<'EOF'
+    if [[ "$task_source_kind" == "superpowers-plan" ]]; then
+      echo "## Implementation Plan"
+      echo
+      cat "$task_file"
+      if [[ -n "$task_supporting_spec_path" ]]; then
+        echo
+        echo "## Supporting Spec"
+        echo
+        cat "$task_supporting_spec_path"
+      fi
+    else
+      cat <<'EOF'
 ## Task Brief
 EOF
-    echo
-    cat "$task_file"
+      echo
+      cat "$task_file"
+    fi
 
     if [[ ! -f "$inspector_source" ]]; then
       cat <<'EOF'
@@ -362,6 +493,10 @@ build_run_summary() {
     echo "- Workspace root: \`$workspace_dir\`"
     echo "- Session: \`$session_name\`"
     echo "- Task file: \`$task_file\`"
+    echo "- Task source kind: \`$task_source_kind\`"
+    echo "- Task source path: \`$task_source_path\`"
+    echo "- Supporting spec path: \`$task_supporting_spec_path\`"
+    echo "- Task source root: \`$task_source_root\`"
     echo "- Inspector prompt source: \`$inspector_prompt_source\`"
     echo "- Launcher config: \`$launcher_config\`"
     echo "- Claude launch: \`$claude_launch_command\`"
@@ -500,13 +635,15 @@ source_project_dir="$project_dir"
 
 launcher_config="$project_dir/.squad/launcher.yaml"
 default_task_file="$project_dir/.squad/run-task.md"
-task_file="${task_file_override:-$default_task_file}"
+detected_repo_root="$(git -C "$project_dir" rev-parse --show-toplevel 2>/dev/null || true)"
+task_file=""
+task_source_kind=""
+task_source_path=""
+task_supporting_spec_path=""
+task_source_root=""
 
-if [[ ! -f "$task_file" ]]; then
-  echo "Error: task brief not found: $task_file" >&2
-  echo "Provide --task-file <path> or create $default_task_file" >&2
-  exit 1
-fi
+resolve_task_sources "$project_dir" "$task_file_override" "$default_task_file" "$detected_repo_root"
+task_file="$task_source_path"
 
 CFG_PROJECT_NAME=""
 CFG_SESSION_NAME=""
