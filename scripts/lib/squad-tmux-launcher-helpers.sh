@@ -30,14 +30,14 @@ pane_command_candidates() {
     local existing=""
     local found=0
     [[ -n "$candidate" ]] || return 0
-    set +u
-    for existing in "${candidates[@]}"; do
-      if [[ "$existing" == "$candidate" ]]; then
-        found=1
-        break
-      fi
-    done
-    set -u
+    if (( ${#candidates[@]} > 0 )); then
+      for existing in "${candidates[@]}"; do
+        if [[ "$existing" == "$candidate" ]]; then
+          found=1
+          break
+        fi
+      done
+    fi
     if (( found == 1 )); then
       return 0
     fi
@@ -82,9 +82,9 @@ pane_command_candidates() {
     fi
   fi
 
-  set +u
-  printf '%s\n' "${candidates[@]}"
-  set -u
+  if (( ${#candidates[@]} > 0 )); then
+    printf '%s\n' "${candidates[@]}"
+  fi
 }
 
 is_truthy() {
@@ -112,9 +112,11 @@ copy_array_or_empty() {
   local source_name="$2"
 
   eval "$target_name=()"
-  set +u
+  if ! declare -p "$source_name" >/dev/null 2>&1; then
+    return 0
+  fi
+
   eval 'if ((${#'"$source_name"'[@]} > 0)); then '"$target_name"'=("${'"$source_name"'[@]}"); fi'
-  set -u
 }
 
 repo_worktree_location_slug() {
@@ -160,6 +162,11 @@ resolve_worktree_path() {
 path_is_within() {
   local path="$1"
   local base="$2"
+  case "$path" in
+    */../*|*/./*|../*|./*|*/..|*/.)
+      return 1
+      ;;
+  esac
   [[ "$path" == "$base" || "$path" == "$base"/* ]]
 }
 

@@ -144,7 +144,17 @@ require "yaml"
 require "shellwords"
 
 file = ARGV[0]
-data = File.exist?(file) ? (YAML.load_file(file) || {}) : {}
+data =
+  if File.exist?(file)
+    YAML.safe_load(
+      File.read(file),
+      permitted_classes: [],
+      permitted_symbols: [],
+      aliases: false,
+    ) || {}
+  else
+    {}
+  end
 
 def lookup(hash, *keys)
   keys.reduce(hash) do |acc, key|
@@ -522,6 +532,11 @@ project_name="${CFG_PROJECT_NAME:-$(basename "$project_dir")}"
 session_name="${session_name_override:-${CFG_SESSION_NAME:-${project_name}-squad}}"
 session_name="$(normalize_session_name "$session_name")"
 claude_command="${CFG_CLAUDE_COMMAND:-claude}"
+if [[ "$claude_command" == "~" ]]; then
+  claude_command="$HOME"
+elif [[ "${claude_command:0:2}" == "~/" ]]; then
+  claude_command="$HOME/${claude_command:2}"
+fi
 manager_role="${CFG_MANAGER_ROLE:-manager}"
 worker_role="${CFG_WORKER_ROLE:-worker}"
 inspector_role="${CFG_INSPECTOR_ROLE:-inspector}"
@@ -660,13 +675,13 @@ require_cmd "$claude_command"
 require_cmd tmux
 
 if (( no_setup == 0 )); then
-  echo "[1/5] Refreshing Claude /squad command"
+  echo "[1/6] Refreshing Claude /squad command"
   squad setup claude
 else
-  echo "[1/5] Skipping squad setup claude (--no-setup)"
+  echo "[1/6] Skipping squad setup claude (--no-setup)"
 fi
 
-echo "[2/5] Initializing squad workspace"
+echo "[2/6] Initializing squad workspace"
 (
   cd "$workspace_dir"
   squad init "${init_args[@]}"
@@ -679,7 +694,7 @@ if tmux has-session -t "$session_name" 2>/dev/null; then
     exit 1
   fi
 
-  echo "[3/5] Reusing existing tmux session: $session_name"
+  echo "[3/6] Reusing existing tmux session: $session_name"
   echo "Generated prompt: $prompt_file"
   if (( no_attach == 0 )); then
     if [[ -n "${TMUX:-}" ]]; then
@@ -691,7 +706,7 @@ if tmux has-session -t "$session_name" 2>/dev/null; then
   exit 0
 fi
 
-echo "[3/5] Creating tmux session"
+echo "[3/6] Creating tmux session"
 start_cmd="cd $(shell_escape "$workspace_dir") && exec $claude_launch_command"
 tmux new-session -d -s "$session_name" -n squad "$start_cmd"
 for ((i = 1; i < ${#pane_labels[@]}; i++)); do

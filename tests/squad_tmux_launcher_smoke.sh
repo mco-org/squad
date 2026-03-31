@@ -153,4 +153,28 @@ esac
 
 test "${same_name_roots[0]}" != "${same_name_roots[1]}"
 
+tilde_repo="$tmpdir/tilde-repo"
+mkdir -p "$tilde_repo/.squad"
+git -C "$tmpdir" init -b main tilde-repo >/dev/null
+git -C "$tilde_repo" config user.email "codex@example.com"
+git -C "$tilde_repo" config user.name "Codex"
+echo "tilde" >"$tilde_repo/README.md"
+git -C "$tilde_repo" add README.md
+git -C "$tilde_repo" commit -m "seed" >/dev/null
+
+cat >"$tilde_repo/.squad/launcher.yaml" <<'EOF'
+runtime:
+  claude_command: ~/bin/claude
+  claude_args:
+    - --dangerously-skip-permissions
+EOF
+
+cat >"$tilde_repo/.squad/run-task.md" <<'EOF'
+# Task
+Check tilde command expansion
+EOF
+
+HOME="$tmpdir/home" bash "$launcher" "$tilde_repo" --dry-run --no-setup --no-attach >/dev/null
+grep -q "$tmpdir/home/bin/claude --dangerously-skip-permissions" "$tilde_repo/.squad/quickstart/generated-run-summary.md"
+
 echo "PASS: generic launcher dry-run generated expected files"
