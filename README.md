@@ -86,6 +86,8 @@ scripts/squad-tmux-launch.sh /path/to/project --dry-run
 It can:
 - read project-local launcher config from `.squad/launcher.yaml`
 - read a task brief from `.squad/run-task.md`
+- or auto-discover the latest implementation plan + matching spec from `docs/superpowers/...`
+- or use custom discovery globs from `.squad/launcher.yaml -> task_discovery`
 - generate manager / inspector prompt files under `.squad/quickstart/`
 - start a tiled `tmux` session and inject `/squad` commands into Claude panes
 - optionally create an isolated git worktree before launching agents
@@ -96,6 +98,33 @@ Requirements:
 - `claude`
 
 This launcher is intentionally separate from the core Rust CLI. Treat it as optional automation for people who want a repeatable multi-terminal workflow.
+
+### Launcher task discovery
+
+Task sources are resolved in this order:
+
+1. `--task-file <path>`
+2. `<project>/.squad/run-task.md`
+3. auto-discovery
+
+Default auto-discovery looks for:
+
+- the newest `docs/superpowers/plans/*-implementation.md`
+- plus the newest matching `docs/superpowers/specs/*-design.md`
+
+If your repo uses a different layout or naming convention, configure it in `.squad/launcher.yaml`:
+
+```yaml
+task_discovery:
+  plan_globs:
+    - workitems/plans/*-plan.md
+  spec_globs:
+    - workitems/specifications/*-spec.md
+  plan_suffix: -plan.md
+  spec_suffix: -spec.md
+```
+
+With that config, the launcher will pick the newest matching plan, derive its topic from the filename, and attach the newest matching spec with the same topic slug.
 
 ## Usage Flow
 

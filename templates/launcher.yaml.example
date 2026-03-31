@@ -21,6 +21,17 @@ workspace:
     path: example-task
     base_ref: HEAD
 
+task_discovery:
+  # Optional. If omitted, the launcher falls back to:
+  #   docs/superpowers/plans/*-implementation.md
+  #   docs/superpowers/specs/*-design.md
+  plan_globs:
+    - workitems/plans/*-plan.md
+  spec_globs:
+    - workitems/specifications/*-spec.md
+  plan_suffix: -plan.md
+  spec_suffix: -spec.md
+
 focus:
   files:
     - src/index.ts
