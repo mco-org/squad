@@ -34,7 +34,7 @@ Project config:
 Worktree config:
   <project-dir>/.squad/launcher.yaml -> workspace.worktree
   Default location when enabled without an explicit path:
-    ~/.local/share/squad/worktrees/<project-name>
+    ~/.local/share/squad/worktrees/<repo-root-slug>
 
 Generated files:
   <project-dir>/.squad/quickstart/generated-*.md
@@ -320,19 +320,24 @@ EOF
       echo "## Inspector Brief"
       echo
       cat "$inspector_source"
-    else
+      echo
+    fi
+
+    cat <<'EOF'
+## Task Brief
+EOF
+    echo
+    cat "$task_file"
+
+    if [[ ! -f "$inspector_source" ]]; then
       cat <<'EOF'
-## Inspector Brief
-Review the manager / worker output against the task brief and confirm:
+## Review Checklist
+Use the task brief above to confirm:
 - the implementation satisfies the goal rather than only making tests pass
 - no behavior regressions or compatibility breaks were introduced
 - README, configuration guidance, and diagnostics still match the implementation
 - tests genuinely cover the change objective
-
-## Task Brief
 EOF
-      echo
-      cat "$task_file"
     fi
   } >"$output_path"
 }
@@ -537,13 +542,11 @@ if ! [[ "$workers" =~ ^[0-9]+$ ]] || (( workers < 1 )); then
   exit 1
 fi
 
-set +u
-claude_args=("${CFG_CLAUDE_ARGS[@]}")
-init_args=("${CFG_INIT_ARGS[@]}")
-focus_files=("${CFG_FOCUS_FILES[@]}")
-focus_docs=("${CFG_FOCUS_DOCS[@]}")
-constraints=("${CFG_CONSTRAINTS[@]}")
-set -u
+copy_array_or_empty claude_args CFG_CLAUDE_ARGS
+copy_array_or_empty init_args CFG_INIT_ARGS
+copy_array_or_empty focus_files CFG_FOCUS_FILES
+copy_array_or_empty focus_docs CFG_FOCUS_DOCS
+copy_array_or_empty constraints CFG_CONSTRAINTS
 
 if (( ${#init_args[@]} == 0 )); then
   init_args=(--refresh-roles)
@@ -572,7 +575,7 @@ if (( worktree_enabled == 1 )); then
     project_relative_path="${source_project_dir#$git_repo_root/}"
   fi
 
-  default_worktree_location="~/.local/share/squad/worktrees/$project_name"
+  default_worktree_location="~/.local/share/squad/worktrees/$(repo_worktree_location_slug "$git_repo_root")"
   worktree_location="${worktree_location_override:-${CFG_WORKTREE_LOCATION:-$default_worktree_location}}"
   worktree_branch="${worktree_branch_override:-${CFG_WORKTREE_BRANCH:-}}"
   worktree_base_ref="${worktree_base_ref_override:-${CFG_WORKTREE_BASE_REF:-HEAD}}"
@@ -611,7 +614,10 @@ if (( worktree_enabled == 1 )); then
 fi
 mkdir -p "$quickstart_dir"
 
-claude_launch_command="$(shell_join "$claude_command" "${claude_args[@]}")"
+claude_launch_command="$(shell_join "$claude_command")"
+if (( ${#claude_args[@]} > 0 )); then
+  claude_launch_command="$(shell_join "$claude_command" "${claude_args[@]}")"
+fi
 inspector_prompt_source="$source_project_dir/.squad/prompts/inspector.md"
 
 prompt_file="$quickstart_dir/generated-manager.prompt.md"

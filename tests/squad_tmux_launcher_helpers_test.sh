@@ -48,6 +48,7 @@ test "$resolved_root" = "$repo_dir/.worktrees"
 
 requested_path="$(resolve_worktree_path "$repo_dir" ".worktrees" "mcp-upgrade")"
 test "$requested_path" = "$repo_dir/.worktrees/mcp-upgrade"
+test "$(repo_worktree_location_slug "$repo_dir")" != "$(basename "$repo_dir")"
 
 ! ensure_repo_local_worktree_ignored "$repo_dir" "$requested_path"
 echo ".worktrees/" >>"$repo_dir/.gitignore"
@@ -60,6 +61,18 @@ test "$(git -C "$requested_path" branch --show-current)" = "feat/mcp-upgrade"
 
 reused_path="$(ensure_git_worktree "$repo_dir" "$repo_dir/.worktrees/other-path" "feat/mcp-upgrade" "HEAD" 0)"
 test "$reused_path" = "$requested_path"
+
+other_repo_dir="$tmpdir/other-repo"
+mkdir -p "$other_repo_dir"
+git -C "$tmpdir" init -b main other-repo >/dev/null
+other_repo_dir="$(cd "$other_repo_dir" && pwd -P)"
+git -C "$other_repo_dir" config user.email "codex@example.com"
+git -C "$other_repo_dir" config user.name "Codex"
+echo "world" >"$other_repo_dir/README.md"
+git -C "$other_repo_dir" add README.md
+git -C "$other_repo_dir" commit -m "init" >/dev/null
+
+! ensure_git_worktree "$other_repo_dir" "$requested_path" "feat/mcp-upgrade" "HEAD" 0
 
 planned_path="$(ensure_git_worktree "$repo_dir" "$repo_dir/.worktrees/dry-run-path" "feat/dry-run" "HEAD" 1)"
 test "$planned_path" = "$repo_dir/.worktrees/dry-run-path"

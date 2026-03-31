@@ -93,6 +93,7 @@ test -f "$map_file"
 
 grep -q "Improve Feishu support for Claude Code" "$prompt_file"
 grep -q "README, path handling, and Claude install compatibility" "$inspector_prompt_file"
+grep -q "Improve Feishu support for Claude Code" "$inspector_prompt_file"
 grep -q "src/platforms/feishuPlatform.js" "$prompt_file"
 grep -q "Keep Codex runtime behavior unchanged" "$prompt_file"
 grep -q "demo-project-squad" "$summary_file"
@@ -105,5 +106,51 @@ grep -q "Worktree" "$prompt_file"
 grep -q "manager" "$map_file"
 grep -q "worker-2" "$map_file"
 grep -q "inspector" "$map_file"
+
+same_name_roots=()
+for org in org-a org-b; do
+  repo_dir="$tmpdir/$org/demo"
+  mkdir -p "$repo_dir/.squad"
+  git -C "$tmpdir/$org" init -b main demo >/dev/null
+  git -C "$repo_dir" config user.email "codex@example.com"
+  git -C "$repo_dir" config user.name "Codex"
+  echo "seed" >"$repo_dir/README.md"
+  git -C "$repo_dir" add README.md
+  git -C "$repo_dir" commit -m "seed" >/dev/null
+
+  cat >"$repo_dir/.squad/launcher.yaml" <<'EOF'
+workspace:
+  worktree:
+    enabled: true
+    branch: feat/smoke
+EOF
+
+  cat >"$repo_dir/.squad/run-task.md" <<'EOF'
+# Task
+Minimal task brief
+EOF
+
+  output="$(HOME="$tmpdir/home" bash "$launcher" "$repo_dir" --dry-run --no-setup --no-attach)"
+  same_name_roots+=("$(printf '%s\n' "$output" | awk -F': ' '/^Workspace root: /{print $2; exit}')")
+  test -f "$repo_dir/.squad/quickstart/feat-smoke/generated-manager.prompt.md"
+done
+
+case "${same_name_roots[0]}" in
+  "$tmpdir/home/.local/share/squad/worktrees/"*) ;;
+  *)
+    echo "Expected worktree path to expand under HOME, got: ${same_name_roots[0]}" >&2
+    exit 1
+    ;;
+esac
+
+case "${same_name_roots[1]}" in
+  "$tmpdir/home/.local/share/squad/worktrees/"*) ;;
+  *)
+    echo "Expected worktree path to expand under HOME, got: ${same_name_roots[1]}" >&2
+    exit 1
+    ;;
+esac
+
+test "${same_name_roots[0]}" != "${same_name_roots[1]}"
 
 echo "PASS: generic launcher dry-run generated expected files"

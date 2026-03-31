@@ -107,14 +107,30 @@ slugify_path_component() {
   printf '%s' "${value:-worktree}"
 }
 
+copy_array_or_empty() {
+  local target_name="$1"
+  local source_name="$2"
+
+  eval "$target_name=()"
+  set +u
+  eval 'if ((${#'"$source_name"'[@]} > 0)); then '"$target_name"'=("${'"$source_name"'[@]}"); fi'
+  set -u
+}
+
+repo_worktree_location_slug() {
+  local repo_root="$1"
+  local normalized="${repo_root#/}"
+  printf '%s' "$(slugify_path_component "$normalized")"
+}
+
 expand_path_from_base() {
   local path="$1"
   local base_dir="$2"
 
   if [[ "$path" == "~" ]]; then
     path="$HOME"
-  elif [[ "$path" == "~/"* ]]; then
-    path="$HOME/${path#~/}"
+  elif [[ "${path:0:2}" == "~/" ]]; then
+    path="$HOME/${path:2}"
   elif [[ "$path" != /* ]]; then
     path="$base_dir/$path"
   fi
@@ -204,6 +220,8 @@ ensure_git_worktree() {
   local dry_run="${5:-0}"
   local existing_branch_path=""
   local current_branch=""
+  local requested_common_dir=""
+  local repo_common_dir=""
 
   if [[ -z "$branch_name" ]]; then
     echo "Error: worktree branch name is required" >&2
@@ -217,6 +235,19 @@ ensure_git_worktree() {
   fi
 
   if [[ -f "$requested_path/.git" || -d "$requested_path/.git" ]]; then
+    requested_common_dir="$(git -C "$requested_path" rev-parse --git-common-dir 2>/dev/null || true)"
+    repo_common_dir="$(git -C "$repo_root" rev-parse --git-common-dir 2>/dev/null || true)"
+    if [[ -n "$requested_common_dir" && "$requested_common_dir" != /* ]]; then
+      requested_common_dir="$requested_path/$requested_common_dir"
+    fi
+    if [[ -n "$repo_common_dir" && "$repo_common_dir" != /* ]]; then
+      repo_common_dir="$repo_root/$repo_common_dir"
+    fi
+    if [[ -n "$requested_common_dir" && -n "$repo_common_dir" && "$requested_common_dir" != "$repo_common_dir" ]]; then
+      echo "Error: requested worktree path belongs to a different repository: $requested_path" >&2
+      return 1
+    fi
+
     current_branch="$(git -C "$requested_path" branch --show-current 2>/dev/null || true)"
     if [[ -n "$current_branch" && "$current_branch" != "$branch_name" ]]; then
       echo "Error: requested worktree path already exists on branch '$current_branch': $requested_path" >&2
