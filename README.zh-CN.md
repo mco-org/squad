@@ -126,7 +126,7 @@ task_discovery:
   spec_suffix: -spec.md
 ```
 
-配置后，launcher 会选出最新的 plan，从文件名里提取 topic，再自动附带同一 topic 的最新 spec。
+`plan_globs` 和 `spec_globs` 都是相对于你传入的 `project-dir` 解析的。配置后，launcher 会选出最新的 plan，从文件名里提取 topic，再自动附带同一 topic 的最新 spec。
 
 ## 使用流程
 

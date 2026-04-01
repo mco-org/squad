@@ -124,7 +124,7 @@ task_discovery:
   spec_suffix: -spec.md
 ```
 
-With that config, the launcher will pick the newest matching plan, derive its topic from the filename, and attach the newest matching spec with the same topic slug.
+`plan_globs` and `spec_globs` are resolved relative to the `project-dir` you pass to the launcher. With that config, the launcher will pick the newest matching plan, derive its topic from the filename, and attach the newest matching spec with the same topic slug.
 
 ## Usage Flow
 

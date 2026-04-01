@@ -293,4 +293,129 @@ grep -q "Remote Control Gateway Plan" "$custom_inspector_prompt"
 grep -q "workitems/plans/2026-03-31-remote-control-gateway-plan.md" "$custom_summary"
 grep -q "workitems/specifications/2026-03-31-remote-control-gateway-spec.md" "$custom_summary"
 
+custom_sort_repo="$tmpdir/custom-sort-repo"
+mkdir -p "$custom_sort_repo/.squad" "$custom_sort_repo/a/plans" "$custom_sort_repo/z/plans" "$custom_sort_repo/a/specs" "$custom_sort_repo/z/specs"
+git -C "$tmpdir" init -b main custom-sort-repo >/dev/null
+git -C "$custom_sort_repo" config user.email "codex@example.com"
+git -C "$custom_sort_repo" config user.name "Codex"
+echo "sort" >"$custom_sort_repo/README.md"
+git -C "$custom_sort_repo" add README.md
+git -C "$custom_sort_repo" commit -m "seed" >/dev/null
+
+cat >"$custom_sort_repo/.squad/launcher.yaml" <<'EOF'
+task_discovery:
+  plan_globs:
+    - a/plans/*-plan.md
+    - z/plans/*-plan.md
+  spec_globs:
+    - a/specs/*-spec.md
+    - z/specs/*-spec.md
+  plan_suffix: -plan.md
+  spec_suffix: -spec.md
+EOF
+
+cat >"$custom_sort_repo/a/plans/2026-04-01-newer-plan.md" <<'EOF'
+# Newer Plan
+EOF
+
+cat >"$custom_sort_repo/a/specs/2026-04-01-newer-spec.md" <<'EOF'
+# Newer Spec
+EOF
+
+cat >"$custom_sort_repo/z/plans/2026-03-01-older-plan.md" <<'EOF'
+# Older Plan
+EOF
+
+cat >"$custom_sort_repo/z/specs/2026-03-01-older-spec.md" <<'EOF'
+# Older Spec
+EOF
+
+bash "$launcher" "$custom_sort_repo" --dry-run --no-setup --no-attach >/dev/null
+
+custom_sort_prompt="$custom_sort_repo/.squad/quickstart/generated-manager.prompt.md"
+custom_sort_summary="$custom_sort_repo/.squad/quickstart/generated-run-summary.md"
+
+grep -q "Newer Plan" "$custom_sort_prompt"
+grep -q "Newer Spec" "$custom_sort_prompt"
+grep -q "a/plans/2026-04-01-newer-plan.md" "$custom_sort_summary"
+grep -q "a/specs/2026-04-01-newer-spec.md" "$custom_sort_summary"
+
+subproject_repo="$tmpdir/subproject-repo"
+mkdir -p "$subproject_repo/subproj/.squad" "$subproject_repo/workitems/plans"
+git -C "$tmpdir" init -b main subproject-repo >/dev/null
+git -C "$subproject_repo" config user.email "codex@example.com"
+git -C "$subproject_repo" config user.name "Codex"
+echo "subproject" >"$subproject_repo/README.md"
+git -C "$subproject_repo" add README.md
+git -C "$subproject_repo" commit -m "seed" >/dev/null
+
+cat >"$subproject_repo/subproj/.squad/launcher.yaml" <<'EOF'
+project:
+  name: subproj
+
+task_discovery:
+  plan_globs:
+    - workitems/plans/*-plan.md
+  spec_globs:
+    - workitems/specifications/*-spec.md
+  plan_suffix: -plan.md
+  spec_suffix: -spec.md
+EOF
+
+cat >"$subproject_repo/workitems/plans/2026-04-01-root-plan.md" <<'EOF'
+# Root Plan
+EOF
+
+set +e
+subproject_output="$(bash "$launcher" "$subproject_repo/subproj" --dry-run --no-setup --no-attach 2>&1)"
+subproject_status=$?
+set -e
+
+if (( subproject_status == 0 )); then
+  echo "Expected custom discovery to stay within subproject config root" >&2
+  exit 1
+fi
+
+printf '%s\n' "$subproject_output" | grep -q "configure task_discovery.plan_globs"
+if printf '%s\n' "$subproject_output" | grep -q "Root Plan"; then
+  echo "Unexpectedly selected repo-root plan for subproject launcher config" >&2
+  exit 1
+fi
+
+taskfile_repo="$tmpdir/taskfile-repo"
+mkdir -p "$taskfile_repo/subproj/.squad" "$taskfile_repo/subproj/workitems/plans" "$taskfile_repo/subproj/workitems/specifications"
+git -C "$tmpdir" init -b main taskfile-repo >/dev/null
+git -C "$taskfile_repo" config user.email "codex@example.com"
+git -C "$taskfile_repo" config user.name "Codex"
+echo "taskfile" >"$taskfile_repo/README.md"
+git -C "$taskfile_repo" add README.md
+git -C "$taskfile_repo" commit -m "seed" >/dev/null
+
+cat >"$taskfile_repo/subproj/.squad/launcher.yaml" <<'EOF'
+task_discovery:
+  plan_globs:
+    - workitems/plans/*-plan.md
+  spec_globs:
+    - workitems/specifications/*-spec.md
+  plan_suffix: -plan.md
+  spec_suffix: -spec.md
+EOF
+
+cat >"$taskfile_repo/subproj/workitems/plans/2026-04-01-demo-plan.md" <<'EOF'
+# Demo Plan
+EOF
+
+cat >"$taskfile_repo/subproj/workitems/specifications/2026-04-01-demo-spec.md" <<'EOF'
+# Demo Spec
+EOF
+
+bash "$launcher" "$taskfile_repo/subproj" --task-file "$taskfile_repo/subproj/workitems/plans/2026-04-01-demo-plan.md" --dry-run --no-setup --no-attach >/dev/null
+
+taskfile_prompt="$taskfile_repo/subproj/.squad/quickstart/generated-manager.prompt.md"
+taskfile_summary="$taskfile_repo/subproj/.squad/quickstart/generated-run-summary.md"
+
+grep -q "Demo Plan" "$taskfile_prompt"
+grep -q "Demo Spec" "$taskfile_prompt"
+grep -q "subproj/workitems/specifications/2026-04-01-demo-spec.md" "$taskfile_summary"
+
 echo "PASS: generic launcher dry-run generated expected files"

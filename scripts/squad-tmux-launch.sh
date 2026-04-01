@@ -228,7 +228,7 @@ patterns = ARGV
 matches = patterns.flat_map { |pattern| Dir.glob(File.join(root, pattern), File::FNM_EXTGLOB) }
   .select { |path| File.file?(path) }
   .uniq
-  .sort
+  .sort_by { |path| [File.basename(path), path] }
 puts matches.last if matches.any?
 RUBY
 }
@@ -247,8 +247,41 @@ patterns = ARGV
 matches = patterns.flat_map { |pattern| Dir.glob(File.join(root, pattern), File::FNM_EXTGLOB) }
   .select { |path| File.file?(path) }
   .uniq
-  .sort
+  .sort_by { |path| [File.basename(path), path] }
 puts matches
+RUBY
+}
+
+path_matches_glob_patterns() {
+  local root="$1"
+  local candidate="$2"
+  shift 2
+  (( $# > 0 )) || return 1
+  [[ -d "$root" ]] || return 1
+
+  require_cmd ruby
+
+  ruby - "$root" "$candidate" "$@" <<'RUBY'
+root = File.expand_path(ARGV.shift)
+candidate = File.expand_path(ARGV.shift)
+patterns = ARGV
+
+begin
+  relative = candidate.delete_prefix(root + "/")
+  if relative == candidate || relative.empty?
+    exit 1
+  end
+
+  matched = patterns.any? do |pattern|
+    Dir.glob(File.join(root, pattern), File::FNM_EXTGLOB).any? do |path|
+      File.expand_path(path) == candidate
+    end
+  end
+
+  exit(matched ? 0 : 1)
+rescue StandardError
+  exit 1
+end
 RUBY
 }
 
@@ -331,6 +364,32 @@ resolve_discovery_candidate() {
   fi
 }
 
+discovery_root_for_plan_file() {
+  local plan_file="$1"
+  local project_dir="$2"
+  local repo_root="$3"
+
+  if (( ${#task_discovery_plan_globs[@]} > 0 )); then
+    if path_matches_glob_patterns "$project_dir" "$plan_file" "${task_discovery_plan_globs[@]}"; then
+      printf '%s\n' "$project_dir"
+      return 0
+    fi
+    return 1
+  fi
+
+  if [[ "$plan_file" == "$project_dir"/docs/superpowers/plans/*"$task_discovery_plan_suffix" ]]; then
+    printf '%s\n' "$project_dir"
+    return 0
+  fi
+
+  if [[ -n "$repo_root" && "$repo_root" != "$project_dir" ]] && [[ "$plan_file" == "$repo_root"/docs/superpowers/plans/*"$task_discovery_plan_suffix" ]]; then
+    printf '%s\n' "$repo_root"
+    return 0
+  fi
+
+  return 1
+}
+
 resolve_task_sources() {
   local project_dir="$1"
   local task_override="$2"
@@ -356,7 +415,7 @@ resolve_task_sources() {
     task_source_path="$default_task_file"
   else
     search_roots=("$project_dir")
-    if [[ -n "$repo_root" && "$repo_root" != "$project_dir" ]]; then
+    if (( ${#task_discovery_plan_globs[@]} == 0 )) && [[ -n "$repo_root" && "$repo_root" != "$project_dir" ]]; then
       search_roots+=("$repo_root")
     fi
 
@@ -380,7 +439,10 @@ resolve_task_sources() {
 
   if [[ "$task_source_kind" == "task-brief" ]] && looks_like_plan_file "$task_source_path"; then
     task_source_kind="superpowers-plan"
-    task_source_root="${repo_root:-$project_dir}"
+    task_source_root="$(discovery_root_for_plan_file "$task_source_path" "$project_dir" "$repo_root" || true)"
+    if [[ -z "$task_source_root" ]]; then
+      task_source_root="$project_dir"
+    fi
     task_supporting_spec_path="$(latest_matching_spec_for_plan "$task_source_path" "$task_source_root" || true)"
   fi
 }

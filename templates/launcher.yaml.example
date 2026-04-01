@@ -25,6 +25,7 @@ task_discovery:
   # Optional. If omitted, the launcher falls back to:
   #   docs/superpowers/plans/*-implementation.md
   #   docs/superpowers/specs/*-design.md
+  # Globs are resolved relative to the project dir passed to the launcher.
   plan_globs:
     - workitems/plans/*-plan.md
   spec_globs:
