@@ -133,6 +133,67 @@ send_tmux_text() {
   tmux delete-buffer
 }
 
+capture_pane_text() {
+  local target="$1"
+  tmux capture-pane -t "$target" -p -S -120
+}
+
+wait_for_pane_ready() {
+  local target="$1"
+  local timeout_secs="$2"
+  local start_ts
+  start_ts="$(date +%s)"
+
+  while true; do
+    local capture=""
+    capture="$(capture_pane_text "$target")"
+
+    if pane_capture_has_workspace_trust_prompt "$capture"; then
+      tmux send-keys -t "$target" Enter
+      sleep 1
+      continue
+    fi
+
+    if pane_capture_has_interactive_prompt "$capture"; then
+      return 0
+    fi
+
+    if (( "$(date +%s)" - start_ts >= timeout_secs )); then
+      echo "Error: pane $target did not reach an interactive Claude prompt within ${timeout_secs}s" >&2
+      return 1
+    fi
+
+    sleep 1
+  done
+}
+
+resubmit_pending_squad_command_if_needed() {
+  local target="$1"
+  local command_text="$2"
+  local capture=""
+  capture="$(capture_pane_text "$target")"
+
+  if pane_capture_has_workspace_trust_prompt "$capture"; then
+    tmux send-keys -t "$target" Enter
+    return 0
+  fi
+
+  if pane_capture_has_pending_command_input "$capture" "$command_text" && ! pane_capture_has_squad_command_activity "$capture"; then
+    tmux send-keys -t "$target" Enter
+    return 0
+  fi
+
+  return 1
+}
+
+current_agent_count() {
+  local workspace="$1"
+  (
+    cd "$workspace"
+    squad agents --json 2>/dev/null || true
+  ) | awk 'NF { count += 1 } END { print count + 0 }'
+}
+
 load_launcher_config() {
   local config_path="$1"
   if [[ ! -f "$config_path" ]]; then
@@ -1049,11 +1110,22 @@ while IFS= read -r alias; do
 done < <(pane_command_candidates "$claude_command")
 for i in "${!pane_labels[@]}"; do
   wait_for_pane_command "$session_name":0."$i" 30 "${pane_command_aliases[@]}"
+  wait_for_pane_ready "$session_name":0."$i" 30
 done
 
 echo "[4/6] Sending squad commands"
 for i in "${!pane_commands[@]}"; do
   send_tmux_text "$session_name":0."$i" "${pane_commands[$i]}"
+done
+
+for attempt in 1 2 3; do
+  if (( "$(current_agent_count "$workspace_dir")" >= ${#pane_commands[@]} )); then
+    break
+  fi
+  sleep 2
+  for i in "${!pane_commands[@]}"; do
+    resubmit_pending_squad_command_if_needed "$session_name":0."$i" "${pane_commands[$i]}" || true
+  done
 done
 
 echo "[5/6] Waiting for agents to join squad"

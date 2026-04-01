@@ -170,6 +170,35 @@ path_is_within() {
   [[ "$path" == "$base" || "$path" == "$base"/* ]]
 }
 
+pane_capture_has_workspace_trust_prompt() {
+  local capture="$1"
+  [[ "$capture" == *"Yes, I trust this folder"* ]] && [[ "$capture" == *"Enter to confirm"* ]]
+}
+
+pane_capture_has_interactive_prompt() {
+  local capture="$1"
+  [[ "$capture" == *"❯"* ]]
+}
+
+pane_capture_has_pending_command_input() {
+  local capture="$1"
+  local command_text="$2"
+  [[ -n "$command_text" ]] || return 1
+  [[ "$capture" == *"❯"*"$command_text"* ]]
+}
+
+pane_capture_has_squad_command_activity() {
+  local capture="$1"
+  case "$capture" in
+    *"Skill(/squad)"*|*"Bash(squad "*|*"Joined as "*|*"joining the squad"*|*"I'm joining the squad"*|*"I'll join the squad"*|*"No agents online."*|*"Initialized squad workspace."*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 ensure_repo_local_worktree_ignored() {
   local repo_root="$1"
   local path="$2"
