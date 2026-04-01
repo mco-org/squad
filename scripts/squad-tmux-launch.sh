@@ -223,10 +223,23 @@ latest_matching_glob_patterns() {
   require_cmd ruby
 
   ruby - "$root" "$@" <<'RUBY'
-root = ARGV.shift
+root_arg = ARGV.shift
+root = begin
+  File.realpath(root_arg)
+rescue StandardError
+  File.expand_path(root_arg)
+end
 patterns = ARGV
 matches = patterns.flat_map { |pattern| Dir.glob(File.join(root, pattern), File::FNM_EXTGLOB) }
-  .select { |path| File.file?(path) }
+  .select do |path|
+    next false unless File.file?(path)
+    expanded = begin
+      File.realpath(path)
+    rescue StandardError
+      File.expand_path(path)
+    end
+    expanded == root || expanded.start_with?(root + "/")
+  end
   .uniq
   .sort_by { |path| [File.basename(path), path] }
 puts matches.last if matches.any?
@@ -242,10 +255,23 @@ all_matching_glob_patterns() {
   require_cmd ruby
 
   ruby - "$root" "$@" <<'RUBY'
-root = ARGV.shift
+root_arg = ARGV.shift
+root = begin
+  File.realpath(root_arg)
+rescue StandardError
+  File.expand_path(root_arg)
+end
 patterns = ARGV
 matches = patterns.flat_map { |pattern| Dir.glob(File.join(root, pattern), File::FNM_EXTGLOB) }
-  .select { |path| File.file?(path) }
+  .select do |path|
+    next false unless File.file?(path)
+    expanded = begin
+      File.realpath(path)
+    rescue StandardError
+      File.expand_path(path)
+    end
+    expanded == root || expanded.start_with?(root + "/")
+  end
   .uniq
   .sort_by { |path| [File.basename(path), path] }
 puts matches

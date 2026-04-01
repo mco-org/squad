@@ -418,4 +418,42 @@ grep -q "Demo Plan" "$taskfile_prompt"
 grep -q "Demo Spec" "$taskfile_prompt"
 grep -q "subproj/workitems/specifications/2026-04-01-demo-spec.md" "$taskfile_summary"
 
+escape_repo="$tmpdir/escape-repo"
+mkdir -p "$escape_repo/.squad" "$tmpdir/outside-docs/plans"
+git -C "$tmpdir" init -b main escape-repo >/dev/null
+git -C "$escape_repo" config user.email "codex@example.com"
+git -C "$escape_repo" config user.name "Codex"
+echo "escape" >"$escape_repo/README.md"
+git -C "$escape_repo" add README.md
+git -C "$escape_repo" commit -m "seed" >/dev/null
+
+cat >"$escape_repo/.squad/launcher.yaml" <<'EOF'
+task_discovery:
+  plan_globs:
+    - ../outside-docs/plans/*-plan.md
+  plan_suffix: -plan.md
+EOF
+
+cat >"$tmpdir/outside-docs/plans/2026-04-01-escaped-plan.md" <<'EOF'
+# Escaped Plan
+EOF
+
+set +e
+escape_output="$(bash "$launcher" "$escape_repo" --dry-run --no-setup --no-attach 2>&1)"
+escape_rc=$?
+set -e
+
+if (( escape_rc == 0 )); then
+  echo "Expected task discovery globs to stay within project-dir" >&2
+  exit 1
+fi
+
+printf '%s\n' "$escape_output" | grep -q "configure task_discovery.plan_globs"
+if [[ -f "$escape_repo/.squad/quickstart/generated-manager.prompt.md" ]]; then
+  if grep -q "Escaped Plan" "$escape_repo/.squad/quickstart/generated-manager.prompt.md"; then
+    echo "Unexpectedly selected escaped plan outside project-dir" >&2
+    exit 1
+  fi
+fi
+
 echo "PASS: generic launcher dry-run generated expected files"
