@@ -337,7 +337,6 @@ matching_spec_from_patterns() {
   local root="$2"
   shift 2
   local -a patterns=("$@")
-  local pattern=""
   local candidate=""
   local candidate_slug=""
   local latest=""
