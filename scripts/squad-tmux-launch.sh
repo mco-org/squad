@@ -28,7 +28,7 @@ Task source priority:
   1. --task-file <path>
   2. <project-dir>/.squad/run-task.md
   3. task_discovery.plan_globs / spec_globs from .squad/launcher.yaml
-     or the default docs/superpowers/plans/*-implementation.md
+     or the default docs/superpowers/plans/YYYY-MM-DD-*-implementation.md
      plus the newest matching spec
 
 Project config:
@@ -398,7 +398,6 @@ matching_spec_from_patterns() {
   local root="$2"
   shift 2
   local -a patterns=("$@")
-  local pattern=""
   local candidate=""
   local candidate_slug=""
   local latest=""

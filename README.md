@@ -107,10 +107,10 @@ Task sources are resolved in this order:
 2. `<project>/.squad/run-task.md`
 3. auto-discovery
 
-Default auto-discovery looks for:
+Default auto-discovery looks for files named with a `YYYY-MM-DD-` date prefix:
 
-- the newest `docs/superpowers/plans/*-implementation.md`
-- plus the newest matching `docs/superpowers/specs/*-design.md`
+- the newest `docs/superpowers/plans/YYYY-MM-DD-*-implementation.md`
+- plus the newest matching `docs/superpowers/specs/YYYY-MM-DD-*-design.md`
 
 If your repo uses a different layout or naming convention, configure it in `.squad/launcher.yaml`:
 
