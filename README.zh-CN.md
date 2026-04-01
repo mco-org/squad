@@ -111,8 +111,8 @@ scripts/squad-tmux-launch.sh /path/to/project --dry-run
 
 默认的自动发现规则会寻找：
 
-- 最新的 `docs/superpowers/plans/*-implementation.md`
-- 以及同主题、最新匹配的 `docs/superpowers/specs/*-design.md`
+- 最新的 `docs/superpowers/plans/????-??-??-*-implementation.md`（文件名需以 `YYYY-MM-DD-` 日期前缀开头）
+- 以及同主题、最新匹配的 `docs/superpowers/specs/????-??-??-*-design.md`（同样要求 `YYYY-MM-DD-` 前缀）
 
 如果你的仓库目录或命名规则不同，可以在 `.squad/launcher.yaml` 里配置：
 
