@@ -645,9 +645,7 @@ EOF
         cat "$task_supporting_spec_path"
       fi
     else
-      cat <<'EOF'
-## Task Brief
-EOF
+      echo "## Task Brief"
       echo
       cat "$task_file"
     fi
@@ -655,7 +653,7 @@ EOF
     if [[ ! -f "$inspector_source" ]]; then
       cat <<'EOF'
 ## Review Checklist
-Use the task brief above to confirm:
+Use the task material above to confirm:
 - the implementation satisfies the goal rather than only making tests pass
 - no behavior regressions or compatibility breaks were introduced
 - README, configuration guidance, and diagnostics still match the implementation
