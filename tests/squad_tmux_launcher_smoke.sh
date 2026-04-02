@@ -121,8 +121,8 @@ project:
   name: mixed-clients
 
 runtime:
-  claude_command: claude
-  claude_args:
+  command: claude
+  args:
     - --dangerously-skip-permissions
   manager_command: codex
   manager_args:
@@ -152,6 +152,38 @@ grep -q 'Setup platforms: `codex, claude`' "$mixed_summary"
 grep -q '| 0 | `manager` | `codex --dangerously-bypass-approvals-and-sandbox` | `/squad manager` |' "$mixed_map"
 grep -q '| 1 | `worker` | `claude --dangerously-skip-permissions` | `/squad worker` |' "$mixed_map"
 grep -q '| 3 | `inspector` | `codex --dangerously-bypass-approvals-and-sandbox` | `/squad inspector` |' "$mixed_map"
+
+generic_defaults_repo="$tmpdir/generic-defaults-repo"
+mkdir -p "$generic_defaults_repo/.squad"
+git -C "$tmpdir" init -b main generic-defaults-repo >/dev/null
+git -C "$generic_defaults_repo" config user.email "codex@example.com"
+git -C "$generic_defaults_repo" config user.name "Codex"
+echo "generic-defaults" >"$generic_defaults_repo/README.md"
+git -C "$generic_defaults_repo" add README.md
+git -C "$generic_defaults_repo" commit -m "seed" >/dev/null
+
+cat >"$generic_defaults_repo/.squad/launcher.yaml" <<'EOF'
+runtime:
+  command: codex
+  args:
+    - --dangerously-bypass-approvals-and-sandbox
+EOF
+
+cat >"$generic_defaults_repo/.squad/run-task.md" <<'EOF'
+# Task
+Ensure generic default runtime fields work for all panes.
+EOF
+
+bash "$launcher" "$generic_defaults_repo" --dry-run --no-setup --no-attach >/dev/null
+
+generic_defaults_summary="$generic_defaults_repo/.squad/quickstart/generated-run-summary.md"
+generic_defaults_map="$generic_defaults_repo/.squad/quickstart/generated-terminal-map.md"
+grep -q 'Default client launch: `codex --dangerously-bypass-approvals-and-sandbox`' "$generic_defaults_summary"
+grep -q 'Manager launch: `codex --dangerously-bypass-approvals-and-sandbox`' "$generic_defaults_summary"
+grep -q 'Worker launch: `codex --dangerously-bypass-approvals-and-sandbox`' "$generic_defaults_summary"
+grep -q 'Inspector launch: `codex --dangerously-bypass-approvals-and-sandbox`' "$generic_defaults_summary"
+grep -q 'Setup platforms: `codex`' "$generic_defaults_summary"
+grep -q '| 0 | `manager` | `codex --dangerously-bypass-approvals-and-sandbox` | `/squad manager` |' "$generic_defaults_map"
 
 role_args_repo="$tmpdir/role-args-repo"
 mkdir -p "$role_args_repo/.squad"

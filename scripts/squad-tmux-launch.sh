@@ -259,6 +259,9 @@ end
 
 emit_scalar("CFG_PROJECT_NAME", lookup(data, "project", "name"))
 emit_scalar("CFG_SESSION_NAME", lookup(data, "project", "session_name"))
+emit_scalar("CFG_DEFAULT_COMMAND", lookup(data, "runtime", "command"))
+emit_array("CFG_DEFAULT_ARGS", lookup(data, "runtime", "args"))
+emit_scalar("CFG_DEFAULT_ARGS_SET", key_present?(data, "runtime", "args") ? "true" : "")
 emit_scalar("CFG_CLAUDE_COMMAND", lookup(data, "runtime", "claude_command"))
 emit_array("CFG_CLAUDE_ARGS", lookup(data, "runtime", "claude_args"))
 emit_scalar("CFG_MANAGER_COMMAND", lookup(data, "runtime", "manager_command"))
@@ -961,6 +964,9 @@ default_task_file="$project_dir/.squad/run-task.md"
 detected_repo_root="$(git -C "$project_dir" rev-parse --show-toplevel 2>/dev/null || true)"
 CFG_PROJECT_NAME=""
 CFG_SESSION_NAME=""
+CFG_DEFAULT_COMMAND=""
+CFG_DEFAULT_ARGS=()
+CFG_DEFAULT_ARGS_SET=""
 CFG_CLAUDE_COMMAND=""
 CFG_CLAUDE_ARGS=()
 CFG_MANAGER_COMMAND=""
@@ -995,7 +1001,7 @@ load_launcher_config "$launcher_config"
 project_name="${CFG_PROJECT_NAME:-$(basename "$project_dir")}"
 session_name="${session_name_override:-${CFG_SESSION_NAME:-${project_name}-squad}}"
 session_name="$(normalize_session_name "$session_name")"
-default_command="${CFG_CLAUDE_COMMAND:-claude}"
+default_command="${CFG_DEFAULT_COMMAND:-${CFG_CLAUDE_COMMAND:-claude}}"
 default_command="$(expand_home_path "$default_command")"
 manager_role="${CFG_MANAGER_ROLE:-manager}"
 worker_role="${CFG_WORKER_ROLE:-worker}"
@@ -1017,7 +1023,12 @@ if ! [[ "$workers" =~ ^[0-9]+$ ]] || (( workers < 1 )); then
   exit 1
 fi
 
-copy_array_or_empty default_args CFG_CLAUDE_ARGS
+default_args=()
+if is_truthy "${CFG_DEFAULT_ARGS_SET:-}"; then
+  copy_array_or_empty default_args CFG_DEFAULT_ARGS
+else
+  copy_array_or_empty default_args CFG_CLAUDE_ARGS
+fi
 copy_array_or_empty manager_args_raw CFG_MANAGER_ARGS
 copy_array_or_empty worker_args_raw CFG_WORKER_ARGS
 copy_array_or_empty inspector_args_raw CFG_INSPECTOR_ARGS
@@ -1045,21 +1056,21 @@ if is_truthy "${CFG_MANAGER_ARGS_SET:-}"; then
 elif [[ -n "${CFG_MANAGER_COMMAND:-}" ]]; then
   manager_args=()
 else
-  copy_array_or_empty manager_args CFG_CLAUDE_ARGS
+  copy_array_or_empty manager_args default_args
 fi
 if is_truthy "${CFG_WORKER_ARGS_SET:-}"; then
   copy_array_or_empty worker_args CFG_WORKER_ARGS
 elif [[ -n "${CFG_WORKER_COMMAND:-}" ]]; then
   worker_args=()
 else
-  copy_array_or_empty worker_args CFG_CLAUDE_ARGS
+  copy_array_or_empty worker_args default_args
 fi
 if is_truthy "${CFG_INSPECTOR_ARGS_SET:-}"; then
   copy_array_or_empty inspector_args CFG_INSPECTOR_ARGS
 elif [[ -n "${CFG_INSPECTOR_COMMAND:-}" ]]; then
   inspector_args=()
 else
-  copy_array_or_empty inspector_args CFG_CLAUDE_ARGS
+  copy_array_or_empty inspector_args default_args
 fi
 
 task_file=""

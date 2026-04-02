@@ -3,11 +3,13 @@ project:
   session_name: my-project-squad
 
 runtime:
-  claude_command: claude
-  claude_args:
+  # Generic defaults for all panes. Legacy aliases `claude_command` /
+  # `claude_args` are still supported for backwards compatibility.
+  command: claude
+  args:
     - --dangerously-skip-permissions
   # Optional per-role overrides. If omitted, the launcher falls back to
-  # claude_command / claude_args for every pane.
+  # runtime.command / runtime.args for every pane.
   manager_command: codex
   manager_args:
     - --dangerously-bypass-approvals-and-sandbox
