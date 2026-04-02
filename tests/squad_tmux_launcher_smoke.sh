@@ -107,6 +107,83 @@ grep -q "manager" "$map_file"
 grep -q "worker-2" "$map_file"
 grep -q "inspector" "$map_file"
 
+mixed_clients_repo="$tmpdir/mixed-clients-repo"
+mkdir -p "$mixed_clients_repo/.squad/prompts"
+git -C "$tmpdir" init -b main mixed-clients-repo >/dev/null
+git -C "$mixed_clients_repo" config user.email "codex@example.com"
+git -C "$mixed_clients_repo" config user.name "Codex"
+echo "mixed" >"$mixed_clients_repo/README.md"
+git -C "$mixed_clients_repo" add README.md
+git -C "$mixed_clients_repo" commit -m "seed" >/dev/null
+
+cat >"$mixed_clients_repo/.squad/launcher.yaml" <<'EOF'
+project:
+  name: mixed-clients
+
+runtime:
+  claude_command: claude
+  claude_args:
+    - --dangerously-skip-permissions
+  manager_command: codex
+  manager_args:
+    - --dangerously-bypass-approvals-and-sandbox
+  worker_command: claude
+  worker_args:
+    - --dangerously-skip-permissions
+  inspector_command: codex
+  inspector_args:
+    - --dangerously-bypass-approvals-and-sandbox
+EOF
+
+cat >"$mixed_clients_repo/.squad/run-task.md" <<'EOF'
+# Task
+Run codex for manager and inspector, and claude for workers.
+EOF
+
+bash "$launcher" "$mixed_clients_repo" --dry-run --no-setup --no-attach >/dev/null
+
+mixed_summary="$mixed_clients_repo/.squad/quickstart/generated-run-summary.md"
+mixed_map="$mixed_clients_repo/.squad/quickstart/generated-terminal-map.md"
+
+grep -q 'Manager launch: `codex --dangerously-bypass-approvals-and-sandbox`' "$mixed_summary"
+grep -q 'Worker launch: `claude --dangerously-skip-permissions`' "$mixed_summary"
+grep -q 'Inspector launch: `codex --dangerously-bypass-approvals-and-sandbox`' "$mixed_summary"
+grep -q 'Setup platforms: `codex, claude`' "$mixed_summary"
+grep -q '| 0 | `manager` | `codex --dangerously-bypass-approvals-and-sandbox` | `/squad manager` |' "$mixed_map"
+grep -q '| 1 | `worker` | `claude --dangerously-skip-permissions` | `/squad worker` |' "$mixed_map"
+grep -q '| 3 | `inspector` | `codex --dangerously-bypass-approvals-and-sandbox` | `/squad inspector` |' "$mixed_map"
+
+role_args_repo="$tmpdir/role-args-repo"
+mkdir -p "$role_args_repo/.squad"
+git -C "$tmpdir" init -b main role-args-repo >/dev/null
+git -C "$role_args_repo" config user.email "codex@example.com"
+git -C "$role_args_repo" config user.name "Codex"
+echo "role-args" >"$role_args_repo/README.md"
+git -C "$role_args_repo" add README.md
+git -C "$role_args_repo" commit -m "seed" >/dev/null
+
+cat >"$role_args_repo/.squad/launcher.yaml" <<'EOF'
+runtime:
+  claude_command: claude
+  claude_args:
+    - --dangerously-skip-permissions
+  manager_command: codex
+EOF
+
+cat >"$role_args_repo/.squad/run-task.md" <<'EOF'
+# Task
+Ensure role-specific command does not inherit claude args by default.
+EOF
+
+bash "$launcher" "$role_args_repo" --dry-run --no-setup --no-attach >/dev/null
+
+role_args_summary="$role_args_repo/.squad/quickstart/generated-run-summary.md"
+grep -q 'Manager launch: `codex`' "$role_args_summary"
+if grep -q 'Manager launch: `codex --dangerously-skip-permissions`' "$role_args_summary"; then
+  echo "manager role unexpectedly inherited global claude args" >&2
+  exit 1
+fi
+
 same_name_roots=()
 for org in org-a org-b; do
   repo_dir="$tmpdir/$org/demo"

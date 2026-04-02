@@ -66,12 +66,14 @@ test "$(repo_worktree_location_slug "$repo_dir")" != "$(basename "$repo_dir")"
 
 trust_capture=$' Accessing workspace:\n\n Quick safety check: Is this a project you created or one you trust?\n\n ❯ 1. Yes, I trust this folder\n   2. No, exit\n\n Enter to confirm · Esc to cancel\n'
 ready_capture=$' Claude Code v2.1.87\n\n❯ \n'
+codex_ready_capture=$' OpenAI Codex (v0.118.0)\n\n› Use /skills to list available skills\n'
 pending_command_capture=$' Claude Code v2.1.87\n\n❯ /squad worker\n'
 active_command_capture=$'❯ /squad worker\n\n⏺ Skill(/squad)\n  ⎿  Successfully loaded skill\n\n⏺ Bash(squad init)\n  ⎿  Running…\n'
 
 pane_capture_has_workspace_trust_prompt "$trust_capture"
 ! pane_capture_has_workspace_trust_prompt "$ready_capture"
 pane_capture_has_interactive_prompt "$ready_capture"
+pane_capture_has_interactive_prompt "$codex_ready_capture"
 pane_capture_has_pending_command_input "$pending_command_capture" "/squad worker"
 ! pane_capture_has_pending_command_input "$ready_capture" "/squad worker"
 ! pane_capture_has_squad_command_activity "$pending_command_capture"

@@ -18,9 +18,9 @@ Options:
   --worktree-base <ref>   Base ref for new worktree branches (default: HEAD)
   --worktree-location <path> Override worktree parent directory
   --no-worktree           Disable worktree mode even if config enables it
-  --no-setup              Skip `squad setup claude`
+  --no-setup              Skip `squad setup` for detected clients
   --no-attach             Create/start session but do not attach
-  --dry-run               Generate prompt/summary/map only; do not run squad/tmux/claude
+  --dry-run               Generate prompt/summary/map only; do not run squad/tmux/clients
   --reuse-session         Reuse an existing tmux session instead of failing
   -h, --help              Show this help
 
@@ -242,10 +242,34 @@ def emit_array(name, value)
   puts ")"
 end
 
+def key_present?(hash, *keys)
+  current = hash
+  keys.each do |key|
+    return false unless current.is_a?(Hash)
+    if current.key?(key)
+      current = current[key]
+    elsif current.key?(key.to_sym)
+      current = current[key.to_sym]
+    else
+      return false
+    end
+  end
+  true
+end
+
 emit_scalar("CFG_PROJECT_NAME", lookup(data, "project", "name"))
 emit_scalar("CFG_SESSION_NAME", lookup(data, "project", "session_name"))
 emit_scalar("CFG_CLAUDE_COMMAND", lookup(data, "runtime", "claude_command"))
 emit_array("CFG_CLAUDE_ARGS", lookup(data, "runtime", "claude_args"))
+emit_scalar("CFG_MANAGER_COMMAND", lookup(data, "runtime", "manager_command"))
+emit_array("CFG_MANAGER_ARGS", lookup(data, "runtime", "manager_args"))
+emit_scalar("CFG_MANAGER_ARGS_SET", key_present?(data, "runtime", "manager_args") ? "true" : "")
+emit_scalar("CFG_WORKER_COMMAND", lookup(data, "runtime", "worker_command"))
+emit_array("CFG_WORKER_ARGS", lookup(data, "runtime", "worker_args"))
+emit_scalar("CFG_WORKER_ARGS_SET", key_present?(data, "runtime", "worker_args") ? "true" : "")
+emit_scalar("CFG_INSPECTOR_COMMAND", lookup(data, "runtime", "inspector_command"))
+emit_array("CFG_INSPECTOR_ARGS", lookup(data, "runtime", "inspector_args"))
+emit_scalar("CFG_INSPECTOR_ARGS_SET", key_present?(data, "runtime", "inspector_args") ? "true" : "")
 emit_scalar("CFG_MANAGER_ROLE", lookup(data, "runtime", "manager_role"))
 emit_scalar("CFG_WORKER_ROLE", lookup(data, "runtime", "worker_role"))
 emit_scalar("CFG_INSPECTOR_ROLE", lookup(data, "runtime", "inspector_role"))
@@ -739,7 +763,11 @@ build_run_summary() {
     echo "- Task source root: \`$task_source_root\`"
     echo "- Inspector prompt source: \`$inspector_prompt_source\`"
     echo "- Launcher config: \`$launcher_config\`"
-    echo "- Claude launch: \`$claude_launch_command\`"
+    echo "- Default client launch: \`$default_launch_command\`"
+    echo "- Manager launch: \`$manager_launch_command\`"
+    echo "- Worker launch: \`$worker_launch_command\`"
+    echo "- Inspector launch: \`$inspector_launch_command\`"
+    echo "- Setup platforms: \`${setup_platforms_display:-none}\`"
     echo "- Workers: \`$workers\`"
     echo "- Dry run: \`$dry_run\`"
     echo "- No setup: \`$no_setup\`"
@@ -768,12 +796,67 @@ build_terminal_map() {
     echo "- tmux session: \`$session_name\`"
     echo "- workspace: \`$workspace_dir\`"
     echo
-    echo "| Pane | Role | Command |"
-    echo "| --- | --- | --- |"
+    echo "| Pane | Role | Launch | Slash Command |"
+    echo "| --- | --- | --- | --- |"
     for i in "${!pane_labels[@]}"; do
-      echo "| $i | \`${pane_labels[$i]}\` | \`${pane_commands[$i]}\` |"
+      echo "| $i | \`${pane_labels[$i]}\` | \`${pane_launch_display[$i]}\` | \`${pane_commands[$i]}\` |"
     done
   } >"$output_path"
+}
+
+join_with_comma_space() {
+  local joined=""
+  local item=""
+  for item in "$@"; do
+    if [[ -n "$joined" ]]; then
+      joined+=", "
+    fi
+    joined+="$item"
+  done
+  printf '%s' "$joined"
+}
+
+platform_for_command() {
+  local command_name="$1"
+  local base=""
+  base="$(basename "$command_name")"
+  case "$base" in
+    claude|claude-code)
+      printf '%s' "claude"
+      ;;
+    codex|codex-cli)
+      printf '%s' "codex"
+      ;;
+    gemini)
+      printf '%s' "gemini"
+      ;;
+    opencode)
+      printf '%s' "opencode"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+add_unique_item() {
+  local value="$1"
+  local array_name="${2:-unique_items}"
+  local item=""
+  local count=0
+  [[ -n "$value" ]] || return 0
+  if ! declare -p "$array_name" >/dev/null 2>&1; then
+    eval "$array_name=()"
+  fi
+  eval "count=\${#$array_name[@]}"
+  if (( count > 0 )); then
+    eval 'for item in "${'"$array_name"'[@]}"; do
+      if [[ "$item" == "$value" ]]; then
+        return 0
+      fi
+    done'
+  fi
+  eval "$array_name+=(\"\$value\")"
 }
 
 no_setup=0
@@ -880,6 +963,15 @@ CFG_PROJECT_NAME=""
 CFG_SESSION_NAME=""
 CFG_CLAUDE_COMMAND=""
 CFG_CLAUDE_ARGS=()
+CFG_MANAGER_COMMAND=""
+CFG_MANAGER_ARGS=()
+CFG_MANAGER_ARGS_SET=""
+CFG_WORKER_COMMAND=""
+CFG_WORKER_ARGS=()
+CFG_WORKER_ARGS_SET=""
+CFG_INSPECTOR_COMMAND=""
+CFG_INSPECTOR_ARGS=()
+CFG_INSPECTOR_ARGS_SET=""
 CFG_MANAGER_ROLE=""
 CFG_WORKER_ROLE=""
 CFG_INSPECTOR_ROLE=""
@@ -903,12 +995,8 @@ load_launcher_config "$launcher_config"
 project_name="${CFG_PROJECT_NAME:-$(basename "$project_dir")}"
 session_name="${session_name_override:-${CFG_SESSION_NAME:-${project_name}-squad}}"
 session_name="$(normalize_session_name "$session_name")"
-claude_command="${CFG_CLAUDE_COMMAND:-claude}"
-if [[ "$claude_command" == "~" ]]; then
-  claude_command="$HOME"
-elif [[ "${claude_command:0:2}" == "~/" ]]; then
-  claude_command="$HOME/${claude_command:2}"
-fi
+default_command="${CFG_CLAUDE_COMMAND:-claude}"
+default_command="$(expand_home_path "$default_command")"
 manager_role="${CFG_MANAGER_ROLE:-manager}"
 worker_role="${CFG_WORKER_ROLE:-worker}"
 inspector_role="${CFG_INSPECTOR_ROLE:-inspector}"
@@ -929,7 +1017,10 @@ if ! [[ "$workers" =~ ^[0-9]+$ ]] || (( workers < 1 )); then
   exit 1
 fi
 
-copy_array_or_empty claude_args CFG_CLAUDE_ARGS
+copy_array_or_empty default_args CFG_CLAUDE_ARGS
+copy_array_or_empty manager_args_raw CFG_MANAGER_ARGS
+copy_array_or_empty worker_args_raw CFG_WORKER_ARGS
+copy_array_or_empty inspector_args_raw CFG_INSPECTOR_ARGS
 copy_array_or_empty init_args CFG_INIT_ARGS
 copy_array_or_empty task_discovery_plan_globs CFG_TASK_DISCOVERY_PLAN_GLOBS
 copy_array_or_empty task_discovery_spec_globs CFG_TASK_DISCOVERY_SPEC_GLOBS
@@ -938,6 +1029,38 @@ copy_array_or_empty focus_docs CFG_FOCUS_DOCS
 copy_array_or_empty constraints CFG_CONSTRAINTS
 task_discovery_plan_suffix="${CFG_TASK_DISCOVERY_PLAN_SUFFIX:--implementation.md}"
 task_discovery_spec_suffix="${CFG_TASK_DISCOVERY_SPEC_SUFFIX:--design.md}"
+
+manager_command="${CFG_MANAGER_COMMAND:-$default_command}"
+manager_command="$(expand_home_path "$manager_command")"
+worker_command="${CFG_WORKER_COMMAND:-$default_command}"
+worker_command="$(expand_home_path "$worker_command")"
+inspector_command="${CFG_INSPECTOR_COMMAND:-$default_command}"
+inspector_command="$(expand_home_path "$inspector_command")"
+
+manager_args=()
+worker_args=()
+inspector_args=()
+if is_truthy "${CFG_MANAGER_ARGS_SET:-}"; then
+  copy_array_or_empty manager_args CFG_MANAGER_ARGS
+elif [[ -n "${CFG_MANAGER_COMMAND:-}" ]]; then
+  manager_args=()
+else
+  copy_array_or_empty manager_args CFG_CLAUDE_ARGS
+fi
+if is_truthy "${CFG_WORKER_ARGS_SET:-}"; then
+  copy_array_or_empty worker_args CFG_WORKER_ARGS
+elif [[ -n "${CFG_WORKER_COMMAND:-}" ]]; then
+  worker_args=()
+else
+  copy_array_or_empty worker_args CFG_CLAUDE_ARGS
+fi
+if is_truthy "${CFG_INSPECTOR_ARGS_SET:-}"; then
+  copy_array_or_empty inspector_args CFG_INSPECTOR_ARGS
+elif [[ -n "${CFG_INSPECTOR_COMMAND:-}" ]]; then
+  inspector_args=()
+else
+  copy_array_or_empty inspector_args CFG_CLAUDE_ARGS
+fi
 
 task_file=""
 task_source_kind=""
@@ -1014,9 +1137,21 @@ if (( worktree_enabled == 1 )); then
 fi
 mkdir -p "$quickstart_dir"
 
-claude_launch_command="$(shell_join "$claude_command")"
-if (( ${#claude_args[@]} > 0 )); then
-  claude_launch_command="$(shell_join "$claude_command" "${claude_args[@]}")"
+default_launch_command="$(shell_join "$default_command")"
+if (( ${#default_args[@]} > 0 )); then
+  default_launch_command="$(shell_join "$default_command" "${default_args[@]}")"
+fi
+manager_launch_command="$(shell_join "$manager_command")"
+if (( ${#manager_args[@]} > 0 )); then
+  manager_launch_command="$(shell_join "$manager_command" "${manager_args[@]}")"
+fi
+worker_launch_command="$(shell_join "$worker_command")"
+if (( ${#worker_args[@]} > 0 )); then
+  worker_launch_command="$(shell_join "$worker_command" "${worker_args[@]}")"
+fi
+inspector_launch_command="$(shell_join "$inspector_command")"
+if (( ${#inspector_args[@]} > 0 )); then
+  inspector_launch_command="$(shell_join "$inspector_command" "${inspector_args[@]}")"
 fi
 inspector_prompt_source="$source_project_dir/.squad/prompts/inspector.md"
 
@@ -1027,6 +1162,9 @@ terminal_map_file="$quickstart_dir/generated-terminal-map.md"
 
 pane_labels=("$manager_role")
 pane_commands=("/squad $manager_role")
+pane_launch_commands=("$manager_launch_command")
+pane_exec_commands=("$manager_command")
+pane_launch_display=("$manager_launch_command")
 for ((i = 1; i <= workers; i++)); do
   if (( i == 1 )); then
     pane_labels+=("$worker_role")
@@ -1035,9 +1173,27 @@ for ((i = 1; i <= workers; i++)); do
     pane_labels+=("${worker_role}-${i}")
     pane_commands+=("/squad $worker_role ${worker_role}-${i}")
   fi
+  pane_launch_commands+=("$worker_launch_command")
+  pane_exec_commands+=("$worker_command")
+  pane_launch_display+=("$worker_launch_command")
 done
 pane_labels+=("$inspector_role")
 pane_commands+=("/squad $inspector_role")
+pane_launch_commands+=("$inspector_launch_command")
+pane_exec_commands+=("$inspector_command")
+pane_launch_display+=("$inspector_launch_command")
+
+unique_items=()
+for role_command in "$manager_command" "$worker_command" "$inspector_command"; do
+  if platform="$(platform_for_command "$role_command" 2>/dev/null)"; then
+    add_unique_item "$platform" unique_items
+  fi
+done
+setup_platforms=("${unique_items[@]}")
+setup_platforms_display="none"
+if (( ${#setup_platforms[@]} > 0 )); then
+  setup_platforms_display="$(join_with_comma_space "${setup_platforms[@]}")"
+fi
 
 build_manager_prompt "$prompt_file" "$project_name" "$workspace_dir" "$task_file"
 build_inspector_prompt "$inspector_prompt_file" "$project_name" "$workspace_dir" "$task_file" "$inspector_prompt_source"
@@ -1056,14 +1212,28 @@ if (( dry_run == 1 )); then
 fi
 
 require_cmd squad
-require_cmd "$claude_command"
+unique_commands=()
+for role_command in "$manager_command" "$worker_command" "$inspector_command"; do
+  add_unique_item "$role_command" unique_commands
+done
+for required_command in "${unique_commands[@]}"; do
+  require_cmd "$required_command"
+done
 require_cmd tmux
 
 if (( no_setup == 0 )); then
-  echo "[1/6] Refreshing Claude /squad command"
-  squad setup claude
+  if (( ${#setup_platforms[@]} == 0 )); then
+    echo "[1/6] No supported squad client platforms detected; skipping squad setup"
+  else
+    echo "[1/6] Refreshing /squad command for: $setup_platforms_display"
+    for platform in "${setup_platforms[@]}"; do
+      squad setup "$platform"
+    done
+  fi
 else
-  echo "[1/6] Skipping squad setup claude (--no-setup)"
+  setup_platforms=()
+  setup_platforms_display=""
+  echo "[1/6] Skipping squad setup (--no-setup)"
 fi
 
 echo "[2/6] Initializing squad workspace"
@@ -1092,9 +1262,10 @@ if tmux has-session -t "$session_name" 2>/dev/null; then
 fi
 
 echo "[3/6] Creating tmux session"
-start_cmd="cd $(shell_escape "$workspace_dir") && exec $claude_launch_command"
+start_cmd="cd $(shell_escape "$workspace_dir") && exec ${pane_launch_commands[0]}"
 tmux new-session -d -s "$session_name" -n squad "$start_cmd"
 for ((i = 1; i < ${#pane_labels[@]}; i++)); do
+  start_cmd="cd $(shell_escape "$workspace_dir") && exec ${pane_launch_commands[$i]}"
   tmux split-window -t "$session_name":0 "$start_cmd"
 done
 tmux select-layout -t "$session_name":0 tiled
@@ -1103,11 +1274,11 @@ for i in "${!pane_labels[@]}"; do
   tmux select-pane -t "$session_name":0."$i" -T "${pane_labels[$i]}"
 done
 
-pane_command_aliases=()
-while IFS= read -r alias; do
-  pane_command_aliases+=("$alias")
-done < <(pane_command_candidates "$claude_command")
 for i in "${!pane_labels[@]}"; do
+  pane_command_aliases=()
+  while IFS= read -r alias; do
+    pane_command_aliases+=("$alias")
+  done < <(pane_command_candidates "${pane_exec_commands[$i]}")
   wait_for_pane_command "$session_name":0."$i" 30 "${pane_command_aliases[@]}"
   wait_for_pane_ready "$session_name":0."$i" 30
 done

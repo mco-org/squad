@@ -16,6 +16,16 @@ shell_join() {
   printf '%s' "$joined"
 }
 
+expand_home_path() {
+  local path="$1"
+  if [[ "$path" == "~" ]]; then
+    path="$HOME"
+  elif [[ "${path:0:2}" == "~/" ]]; then
+    path="$HOME/${path:2}"
+  fi
+  printf '%s' "$path"
+}
+
 pane_command_candidates() {
   local command_name="$1"
   local resolved=""
@@ -177,7 +187,7 @@ pane_capture_has_workspace_trust_prompt() {
 
 pane_capture_has_interactive_prompt() {
   local capture="$1"
-  [[ "$capture" == *"❯"* ]]
+  [[ "$capture" == *"❯"* || "$capture" == *"›"* ]]
 }
 
 pane_capture_has_pending_command_input() {
