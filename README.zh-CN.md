@@ -91,15 +91,43 @@ scripts/squad-tmux-launch.sh /path/to/project --dry-run
 - 或自动发现 `docs/superpowers/...` 下最新的 implementation plan 和匹配 spec
 - 或通过 `.squad/launcher.yaml -> task_discovery` 使用自定义发现规则
 - 在 `.squad/quickstart/` 下生成 manager / inspector prompt
-- 启动平铺布局的 `tmux` 会话，并自动向 Claude pane 注入 `/squad` 命令
+- 启动平铺布局的 `tmux` 会话，并自动向配置好的 AI CLI pane 注入 `/squad` 命令
 - 在启动 agent 前可选地创建独立 git worktree
 
 依赖：
 - `tmux`
 - `ruby`（用于解析 `launcher.yaml`）
-- `claude`
+- 你在配置里指定的 AI CLI 命令（例如 `claude`、`codex`、`gemini`、`opencode`）
 
 这个启动器刻意保持在核心 Rust CLI 之外。它是给需要固定化多终端协作流程的用户准备的可选自动化能力。
+
+### Launcher 客户端配置
+
+Launcher 现在支持“通用默认客户端 + 角色级覆盖”：
+
+```yaml
+runtime:
+  command: codex
+  args:
+    - --dangerously-bypass-approvals-and-sandbox
+
+  worker_command: claude
+  worker_args:
+    - --dangerously-skip-permissions
+```
+
+上面的配置表示：
+- manager pane 默认使用 `codex --dangerously-bypass-approvals-and-sandbox`
+- worker pane 使用 `claude --dangerously-skip-permissions`
+- inspector pane 如果没有单独覆盖，则继续继承默认的 `codex`
+
+支持的运行时字段：
+- `runtime.command` / `runtime.args`：所有 pane 的默认客户端命令
+- `runtime.manager_command` / `runtime.manager_args`
+- `runtime.worker_command` / `runtime.worker_args`
+- `runtime.inspector_command` / `runtime.inspector_args`
+
+为了向后兼容，`runtime.claude_command` 和 `runtime.claude_args` 仍然可用，并会被当作默认客户端配置的旧别名。
 
 ### Launcher 任务发现规则
 

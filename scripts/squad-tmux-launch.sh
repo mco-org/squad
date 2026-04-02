@@ -34,6 +34,13 @@ Task source priority:
 Project config:
   <project-dir>/.squad/launcher.yaml
 
+Client config:
+  runtime.command / runtime.args         Default client command for all panes
+  runtime.manager_command / *_args       Manager-specific override
+  runtime.worker_command / *_args        Worker-specific override
+  runtime.inspector_command / *_args     Inspector-specific override
+  Legacy aliases runtime.claude_command / runtime.claude_args are still supported
+
 Worktree config:
   <project-dir>/.squad/launcher.yaml -> workspace.worktree
   Default location when enabled without an explicit path:
