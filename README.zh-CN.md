@@ -155,10 +155,10 @@ squad setup --list    # 查看支持的平台
 |------|--------|---------|
 | Claude Code | `claude` | `~/.claude/commands/squad.md` |
 | Gemini CLI | `gemini` | `~/.gemini/commands/squad.toml` |
-| Codex CLI | `codex` | `~/.codex/prompts/squad.md` |
+| Codex CLI | `codex` | `~/.codex/skills/squad/SKILL.md` |
 | OpenCode | `opencode` | `~/.config/opencode/commands/squad.md` |
 
-安装后，在任何执行过 `squad init` 的项目中使用 `/squad <角色>` 即可。生成的 slash 模板会自动带上所属平台的 `client` 值和当前支持的协议版本。
+安装后，在任何执行过 `squad init` 的项目中使用 `/squad <角色>`（Codex 中使用 `$squad <角色>`）即可。生成的 slash 模板会自动带上所属平台的 `client` 值和当前支持的协议版本。
 
 `squad init` 不只是创建 `.squad/`：它还会把 `.squad/` 追加到 `.gitignore`，并在 `CLAUDE.md`、`AGENTS.md`、`GEMINI.md` 尚未包含相关段落时，补上一段简短的 squad 协作说明。已有内置角色文件默认不会被覆盖，除非你显式运行 `squad init --refresh-roles`。
 

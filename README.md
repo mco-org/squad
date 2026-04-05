@@ -157,10 +157,10 @@ Supported platforms:
 |----------|--------|-----------------|
 | Claude Code | `claude` | `~/.claude/commands/squad.md` |
 | Gemini CLI | `gemini` | `~/.gemini/commands/squad.toml` |
-| Codex CLI | `codex` | `~/.codex/prompts/squad.md` |
+| Codex CLI | `codex` | `~/.codex/skills/squad/SKILL.md` |
 | OpenCode | `opencode` | `~/.config/opencode/commands/squad.md` |
 
-Once installed, use `/squad <role>` in any project where `squad init` has been run. Generated slash templates automatically join with their platform client type and the current supported protocol version.
+Once installed, use `/squad <role>` (or `$squad <role>` in Codex) in any project where `squad init` has been run. Generated slash templates automatically join with their platform client type and the current supported protocol version.
 
 `squad init` does more than create `.squad/`: it also appends `.squad/` to `.gitignore` and adds a short squad collaboration section to `CLAUDE.md`, `AGENTS.md`, and `GEMINI.md` when those files do not already contain one. Existing builtin role files stay untouched unless you run `squad init --refresh-roles`.
 
