@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./assets/squad-readme-hero.png" alt="squad multi-agent terminal collaboration through SQLite" />
+</p>
+
 <h1 align="center">squad</h1>
 
 <p align="center"><strong>Multi-AI-agent terminal collaboration via simple CLI commands.</strong></p>

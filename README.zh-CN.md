@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./assets/squad-readme-hero.png" alt="squad multi-agent terminal collaboration through SQLite" />
+</p>
+
 <h1 align="center">squad</h1>
 
 <p align="center"><strong>多 AI 智能体终端协作 — 通过简单的 CLI 命令实现。</strong></p>
