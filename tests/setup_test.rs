@@ -1,8 +1,54 @@
 use squad::setup::{
-    current_version, diagnose_templates_for_platforms, install_command, PLATFORMS,
-    SQUAD_MD_CONTENT, SQUAD_TOML_CONTENT,
+    command_path, current_version, diagnose_templates_for_platforms, install_command,
+    install_for_platform, is_installed, PLATFORMS, SQUAD_CODEX_CONTENT, SQUAD_MD_CONTENT,
+    SQUAD_TOML_CONTENT,
 };
+use std::sync::{Mutex, OnceLock};
 use tempfile::TempDir;
+
+fn env_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+struct EnvGuard {
+    home: Option<std::ffi::OsString>,
+    userprofile: Option<std::ffi::OsString>,
+    path: Option<std::ffi::OsString>,
+    pathext: Option<std::ffi::OsString>,
+}
+
+impl EnvGuard {
+    fn new() -> Self {
+        Self {
+            home: std::env::var_os("HOME"),
+            userprofile: std::env::var_os("USERPROFILE"),
+            path: std::env::var_os("PATH"),
+            pathext: std::env::var_os("PATHEXT"),
+        }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        restore_env("HOME", &self.home);
+        restore_env("USERPROFILE", &self.userprofile);
+        restore_env("PATH", &self.path);
+        restore_env("PATHEXT", &self.pathext);
+    }
+}
+
+fn restore_env(key: &str, value: &Option<std::ffi::OsString>) {
+    if let Some(value) = value {
+        std::env::set_var(key, value);
+    } else {
+        std::env::remove_var(key);
+    }
+}
+
+fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+    env_lock().lock().unwrap_or_else(|error| error.into_inner())
+}
 
 #[test]
 fn test_platforms_defined() {
@@ -31,6 +77,92 @@ fn test_toml_content_has_required_sections() {
     assert!(SQUAD_TOML_CONTENT.contains("squad send"));
     assert!(SQUAD_TOML_CONTENT.contains("description"));
     assert!(SQUAD_TOML_CONTENT.contains("prompt"));
+}
+
+#[test]
+fn test_codex_skill_frontmatter_is_valid_yaml() {
+    let frontmatter = SQUAD_CODEX_CONTENT
+        .strip_prefix("---\n")
+        .and_then(|content| content.split_once("\n---"))
+        .map(|(frontmatter, _)| frontmatter)
+        .unwrap();
+
+    serde_yaml::from_str::<serde_yaml::Value>(frontmatter).unwrap();
+}
+
+#[test]
+fn test_installed_codex_skill_frontmatter_is_valid_yaml() {
+    let _lock = lock_env();
+    let _env = EnvGuard::new();
+    let tmp = TempDir::new().unwrap();
+    std::env::set_var("HOME", tmp.path());
+
+    let codex = PLATFORMS
+        .iter()
+        .find(|platform| platform.name == "codex")
+        .unwrap();
+    let path = install_for_platform(codex).unwrap();
+    let content = std::fs::read_to_string(path).unwrap();
+    let frontmatter = content
+        .strip_prefix("---\n")
+        .and_then(|content| content.split_once("\n---"))
+        .map(|(frontmatter, _)| frontmatter)
+        .unwrap();
+
+    let parsed = serde_yaml::from_str::<serde_yaml::Value>(frontmatter).unwrap();
+    assert_eq!(parsed["name"], "squad");
+    assert_eq!(parsed["squad-version"], current_version());
+}
+
+#[test]
+fn test_command_path_falls_back_to_userprofile_when_home_is_missing() {
+    let _lock = lock_env();
+    let _env = EnvGuard::new();
+    let tmp = TempDir::new().unwrap();
+    std::env::remove_var("HOME");
+    std::env::set_var("USERPROFILE", tmp.path());
+
+    let platform = PLATFORMS
+        .iter()
+        .find(|platform| platform.name == "codex")
+        .unwrap();
+    let path = command_path(platform).unwrap();
+
+    assert_eq!(path, tmp.path().join(platform.command_path));
+}
+
+#[test]
+fn test_is_installed_detects_windows_command_wrappers() {
+    let _lock = lock_env();
+    let _env = EnvGuard::new();
+    let tmp = TempDir::new().unwrap();
+    let wrapper = tmp.path().join("codex.cmd");
+    std::fs::write(&wrapper, "@echo off\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&wrapper).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&wrapper, permissions).unwrap();
+    }
+    std::env::set_var("PATH", tmp.path());
+    std::env::set_var("PATHEXT", ".COM;.EXE;.BAT;.CMD");
+
+    assert!(is_installed("codex"));
+}
+
+#[cfg(unix)]
+#[test]
+fn test_is_installed_requires_executable_bit_on_unix_even_with_pathext() {
+    let _lock = lock_env();
+    let _env = EnvGuard::new();
+    let tmp = TempDir::new().unwrap();
+    let wrapper = tmp.path().join("codex.cmd");
+    std::fs::write(&wrapper, "@echo off\n").unwrap();
+    std::env::set_var("PATH", tmp.path());
+    std::env::set_var("PATHEXT", ".COM;.EXE;.BAT;.CMD");
+
+    assert!(!is_installed("codex"));
 }
 
 #[test]

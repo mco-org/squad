@@ -41,7 +41,7 @@ pub const PLATFORMS: &[Platform] = &[
 /// Codex Skills format (uses $ARGUMENTS, placed in ~/.agents/skills/squad/SKILL.md)
 pub const SQUAD_CODEX_CONTENT: &str = r#"---
 name: squad
-description: Join squad multi-agent collaboration. Usage: $squad <role> [custom-id]
+description: "Join squad multi-agent collaboration. Usage: $squad <role> [custom-id]"
 ---
 
 You are joining a squad multi-agent collaboration team.
@@ -379,11 +379,67 @@ pub fn command_content(platform: &Platform) -> String {
 
 /// Check if a binary exists in PATH.
 pub fn is_installed(binary: &str) -> bool {
-    std::process::Command::new("which")
-        .arg(binary)
-        .output()
-        .map(|o| o.status.success())
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    let candidates = command_candidates(binary);
+    for dir in std::env::split_paths(&path) {
+        for candidate in &candidates {
+            if is_command_file(&dir.join(candidate)) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn command_candidates(binary: &str) -> Vec<String> {
+    let mut candidates = vec![binary.to_string()];
+    if Path::new(binary).extension().is_some() {
+        return candidates;
+    }
+    let Some(pathext) = std::env::var_os("PATHEXT") else {
+        return candidates;
+    };
+    for ext in pathext.to_string_lossy().split(';') {
+        if ext.is_empty() {
+            continue;
+        }
+        let normalized = if ext.starts_with('.') {
+            ext.to_string()
+        } else {
+            format!(".{ext}")
+        };
+        candidates.push(format!("{binary}{normalized}"));
+        let lowercase = normalized.to_ascii_lowercase();
+        if lowercase != normalized {
+            candidates.push(format!("{binary}{lowercase}"));
+        }
+    }
+    candidates
+}
+
+fn is_command_file(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    if cfg!(windows) {
+        return true;
+    }
+    is_executable(path)
+}
+
+#[cfg(unix)]
+fn is_executable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    path.metadata()
+        .map(|metadata| metadata.permissions().mode() & 0o111 != 0)
         .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable(path: &Path) -> bool {
+    path.is_file()
 }
 
 /// Detect which platforms are installed.
@@ -396,7 +452,9 @@ pub fn detect_platforms() -> Vec<&'static Platform> {
 
 /// Get the full path for a platform's command file.
 pub fn command_path(platform: &Platform) -> Result<PathBuf> {
-    let home = std::env::var("HOME").context("HOME not set")?;
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .context("HOME or USERPROFILE not set")?;
     Ok(PathBuf::from(home).join(platform.command_path))
 }
 
