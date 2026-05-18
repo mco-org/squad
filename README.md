@@ -293,6 +293,16 @@ squad receive worker --json
 squad send manager @all "API contract changed, update your implementations"
 ```
 
+## Other form factors
+
+squad takes the **pure CLI + SQLite + one terminal per agent** route. It fits best when you:
+
+- live in tmux, or SSH into remote dev boxes
+- want to keep your own terminal emulator
+- don't want any extra background process running
+
+If you'd prefer a visual workbench — task graph UI, one-click restart all, workspace sidebar — take a look at [Hive](https://hivehq.dev/). Hive drives Claude / Codex / Gemini / OpenCode the same way (real CLI processes), but the PTYs run in a browser. The two projects don't replace each other; pick by workflow.
+
 ## Requirements
 
 - Rust 1.77+ (for building)

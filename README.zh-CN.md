@@ -287,6 +287,16 @@ squad receive worker --json
 squad send manager @all "API 接口已更新，请更新你们的实现"
 ```
 
+## 别的形态
+
+squad 走的是 **纯 CLI + SQLite + 每个 agent 一个终端** 的路线，最适合：
+
+- 习惯 tmux、或通过 SSH 进远端服务器开发
+- 想保留自己的终端模拟器
+- 不想跑任何额外后台进程
+
+如果你更想要一个可视化工作台——任务图 UI、一键重启所有 worker、侧边栏切换 workspace——可以看看 [Hive](https://hivehq.dev/)。Hive 同样把 Claude / Codex / Gemini / OpenCode 当真实 CLI 进程驱动，PTY 跑在浏览器里。两个项目互不替代，按工作流挑就行。
+
 ## 系统要求
 
 - Rust 1.77+（编译需要）
