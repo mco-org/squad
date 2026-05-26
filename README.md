@@ -90,16 +90,73 @@ scripts/squad-tmux-launch.sh /path/to/project --dry-run
 It can:
 - read project-local launcher config from `.squad/launcher.yaml`
 - read a task brief from `.squad/run-task.md`
+- or auto-discover the latest implementation plan + matching spec from `docs/superpowers/...`
+- or use custom discovery globs from `.squad/launcher.yaml -> task_discovery`
 - generate manager / inspector prompt files under `.squad/quickstart/`
-- start a tiled `tmux` session and inject `/squad` commands into Claude panes
+- start a tiled `tmux` session and inject `/squad` commands into the configured AI CLI panes
 - optionally create an isolated git worktree before launching agents
 
 Requirements:
 - `tmux`
 - `ruby` (used to parse `launcher.yaml`)
-- `claude`
+- the configured AI CLI commands (for example `claude`, `codex`, `gemini`, or `opencode`)
 
 This launcher is intentionally separate from the core Rust CLI. Treat it as optional automation for people who want a repeatable multi-terminal workflow.
+
+### Launcher client configuration
+
+The launcher now supports a generic default client plus per-role overrides:
+
+```yaml
+runtime:
+  command: codex
+  args:
+    - --dangerously-bypass-approvals-and-sandbox
+
+  worker_command: claude
+  worker_args:
+    - --dangerously-skip-permissions
+```
+
+With that config:
+- manager panes use `codex --dangerously-bypass-approvals-and-sandbox`
+- worker panes use `claude --dangerously-skip-permissions`
+- inspector panes fall back to the default `codex` command unless you override them separately
+
+Supported runtime keys:
+- `runtime.command` / `runtime.args`: default client command for all panes
+- `runtime.manager_command` / `runtime.manager_args`
+- `runtime.worker_command` / `runtime.worker_args`
+- `runtime.inspector_command` / `runtime.inspector_args`
+
+For backwards compatibility, `runtime.claude_command` and `runtime.claude_args` are still accepted as legacy aliases for the default client configuration.
+
+### Launcher task discovery
+
+Task sources are resolved in this order:
+
+1. `--task-file <path>`
+2. `<project>/.squad/run-task.md`
+3. auto-discovery
+
+Default auto-discovery looks for files named with a `YYYY-MM-DD-` date prefix:
+
+- the newest `docs/superpowers/plans/YYYY-MM-DD-*-implementation.md`
+- plus the newest matching `docs/superpowers/specs/YYYY-MM-DD-*-design.md`
+
+If your repo uses a different layout or naming convention, configure it in `.squad/launcher.yaml`:
+
+```yaml
+task_discovery:
+  plan_globs:
+    - workitems/plans/*-plan.md
+  spec_globs:
+    - workitems/specifications/*-spec.md
+  plan_suffix: -plan.md
+  spec_suffix: -spec.md
+```
+
+`plan_globs` and `spec_globs` are resolved relative to the `project-dir` you pass to the launcher. With that config, the launcher will pick the newest matching plan, derive its topic from the filename, and attach the newest matching spec with the same topic slug.
 
 ## Usage Flow
 

@@ -16,6 +16,16 @@ shell_join() {
   printf '%s' "$joined"
 }
 
+expand_home_path() {
+  local path="$1"
+  if [[ "$path" == "~" ]]; then
+    path="$HOME"
+  elif [[ "${path:0:2}" == "~/" ]]; then
+    path="$HOME/${path:2}"
+  fi
+  printf '%s' "$path"
+}
+
 pane_command_candidates() {
   local command_name="$1"
   local resolved=""
@@ -168,6 +178,35 @@ path_is_within() {
       ;;
   esac
   [[ "$path" == "$base" || "$path" == "$base"/* ]]
+}
+
+pane_capture_has_workspace_trust_prompt() {
+  local capture="$1"
+  [[ "$capture" == *"Yes, I trust this folder"* ]] && [[ "$capture" == *"Enter to confirm"* ]]
+}
+
+pane_capture_has_interactive_prompt() {
+  local capture="$1"
+  [[ "$capture" == *"❯"* || "$capture" == *"›"* ]]
+}
+
+pane_capture_has_pending_command_input() {
+  local capture="$1"
+  local command_text="$2"
+  [[ -n "$command_text" ]] || return 1
+  [[ "$capture" == *"❯"*"$command_text"* ]]
+}
+
+pane_capture_has_squad_command_activity() {
+  local capture="$1"
+  case "$capture" in
+    *"Skill(/squad)"*|*"Bash(squad "*|*"Joined as "*|*"joining the squad"*|*"I'm joining the squad"*|*"I'll join the squad"*|*"No agents online."*|*"Initialized squad workspace."*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 ensure_repo_local_worktree_ignored() {

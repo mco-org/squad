@@ -92,16 +92,73 @@ scripts/squad-tmux-launch.sh /path/to/project --dry-run
 它可以：
 - 从 `.squad/launcher.yaml` 读取项目级启动配置
 - 从 `.squad/run-task.md` 读取本次任务说明
+- 或自动发现 `docs/superpowers/...` 下最新的 implementation plan 和匹配 spec
+- 或通过 `.squad/launcher.yaml -> task_discovery` 使用自定义发现规则
 - 在 `.squad/quickstart/` 下生成 manager / inspector prompt
-- 启动平铺布局的 `tmux` 会话，并自动向 Claude pane 注入 `/squad` 命令
+- 启动平铺布局的 `tmux` 会话，并自动向配置好的 AI CLI pane 注入 `/squad` 命令
 - 在启动 agent 前可选地创建独立 git worktree
 
 依赖：
 - `tmux`
 - `ruby`（用于解析 `launcher.yaml`）
-- `claude`
+- 你在配置里指定的 AI CLI 命令（例如 `claude`、`codex`、`gemini`、`opencode`）
 
 这个启动器刻意保持在核心 Rust CLI 之外。它是给需要固定化多终端协作流程的用户准备的可选自动化能力。
+
+### Launcher 客户端配置
+
+Launcher 现在支持“通用默认客户端 + 角色级覆盖”：
+
+```yaml
+runtime:
+  command: codex
+  args:
+    - --dangerously-bypass-approvals-and-sandbox
+
+  worker_command: claude
+  worker_args:
+    - --dangerously-skip-permissions
+```
+
+上面的配置表示：
+- manager pane 默认使用 `codex --dangerously-bypass-approvals-and-sandbox`
+- worker pane 使用 `claude --dangerously-skip-permissions`
+- inspector pane 如果没有单独覆盖，则继续继承默认的 `codex`
+
+支持的运行时字段：
+- `runtime.command` / `runtime.args`：所有 pane 的默认客户端命令
+- `runtime.manager_command` / `runtime.manager_args`
+- `runtime.worker_command` / `runtime.worker_args`
+- `runtime.inspector_command` / `runtime.inspector_args`
+
+为了向后兼容，`runtime.claude_command` 和 `runtime.claude_args` 仍然可用，并会被当作默认客户端配置的旧别名。
+
+### Launcher 任务发现规则
+
+任务输入按下面的优先级解析：
+
+1. `--task-file <path>`
+2. `<project>/.squad/run-task.md`
+3. 自动发现
+
+默认的自动发现规则会寻找：
+
+- 最新的 `docs/superpowers/plans/????-??-??-*-implementation.md`（文件名需以 `YYYY-MM-DD-` 日期前缀开头）
+- 以及同主题、最新匹配的 `docs/superpowers/specs/????-??-??-*-design.md`（同样要求 `YYYY-MM-DD-` 前缀）
+
+如果你的仓库目录或命名规则不同，可以在 `.squad/launcher.yaml` 里配置：
+
+```yaml
+task_discovery:
+  plan_globs:
+    - workitems/plans/*-plan.md
+  spec_globs:
+    - workitems/specifications/*-spec.md
+  plan_suffix: -plan.md
+  spec_suffix: -spec.md
+```
+
+`plan_globs` 和 `spec_globs` 都是相对于你传入的 `project-dir` 解析的。配置后，launcher 会选出最新的 plan，从文件名里提取 topic，再自动附带同一 topic 的最新 spec。
 
 ## 使用流程
 

@@ -107,6 +107,115 @@ grep -q "manager" "$map_file"
 grep -q "worker-2" "$map_file"
 grep -q "inspector" "$map_file"
 
+mixed_clients_repo="$tmpdir/mixed-clients-repo"
+mkdir -p "$mixed_clients_repo/.squad/prompts"
+git -C "$tmpdir" init -b main mixed-clients-repo >/dev/null
+git -C "$mixed_clients_repo" config user.email "codex@example.com"
+git -C "$mixed_clients_repo" config user.name "Codex"
+echo "mixed" >"$mixed_clients_repo/README.md"
+git -C "$mixed_clients_repo" add README.md
+git -C "$mixed_clients_repo" commit -m "seed" >/dev/null
+
+cat >"$mixed_clients_repo/.squad/launcher.yaml" <<'EOF'
+project:
+  name: mixed-clients
+
+runtime:
+  command: claude
+  args:
+    - --dangerously-skip-permissions
+  manager_command: codex
+  manager_args:
+    - --dangerously-bypass-approvals-and-sandbox
+  worker_command: claude
+  worker_args:
+    - --dangerously-skip-permissions
+  inspector_command: codex
+  inspector_args:
+    - --dangerously-bypass-approvals-and-sandbox
+EOF
+
+cat >"$mixed_clients_repo/.squad/run-task.md" <<'EOF'
+# Task
+Run codex for manager and inspector, and claude for workers.
+EOF
+
+bash "$launcher" "$mixed_clients_repo" --dry-run --no-setup --no-attach >/dev/null
+
+mixed_summary="$mixed_clients_repo/.squad/quickstart/generated-run-summary.md"
+mixed_map="$mixed_clients_repo/.squad/quickstart/generated-terminal-map.md"
+
+grep -q 'Manager launch: `codex --dangerously-bypass-approvals-and-sandbox`' "$mixed_summary"
+grep -q 'Worker launch: `claude --dangerously-skip-permissions`' "$mixed_summary"
+grep -q 'Inspector launch: `codex --dangerously-bypass-approvals-and-sandbox`' "$mixed_summary"
+grep -q 'Setup platforms: `codex, claude`' "$mixed_summary"
+grep -q '| 0 | `manager` | `codex --dangerously-bypass-approvals-and-sandbox` | `/squad manager` |' "$mixed_map"
+grep -q '| 1 | `worker` | `claude --dangerously-skip-permissions` | `/squad worker` |' "$mixed_map"
+grep -q '| 3 | `inspector` | `codex --dangerously-bypass-approvals-and-sandbox` | `/squad inspector` |' "$mixed_map"
+
+generic_defaults_repo="$tmpdir/generic-defaults-repo"
+mkdir -p "$generic_defaults_repo/.squad"
+git -C "$tmpdir" init -b main generic-defaults-repo >/dev/null
+git -C "$generic_defaults_repo" config user.email "codex@example.com"
+git -C "$generic_defaults_repo" config user.name "Codex"
+echo "generic-defaults" >"$generic_defaults_repo/README.md"
+git -C "$generic_defaults_repo" add README.md
+git -C "$generic_defaults_repo" commit -m "seed" >/dev/null
+
+cat >"$generic_defaults_repo/.squad/launcher.yaml" <<'EOF'
+runtime:
+  command: codex
+  args:
+    - --dangerously-bypass-approvals-and-sandbox
+EOF
+
+cat >"$generic_defaults_repo/.squad/run-task.md" <<'EOF'
+# Task
+Ensure generic default runtime fields work for all panes.
+EOF
+
+bash "$launcher" "$generic_defaults_repo" --dry-run --no-setup --no-attach >/dev/null
+
+generic_defaults_summary="$generic_defaults_repo/.squad/quickstart/generated-run-summary.md"
+generic_defaults_map="$generic_defaults_repo/.squad/quickstart/generated-terminal-map.md"
+grep -q 'Default client launch: `codex --dangerously-bypass-approvals-and-sandbox`' "$generic_defaults_summary"
+grep -q 'Manager launch: `codex --dangerously-bypass-approvals-and-sandbox`' "$generic_defaults_summary"
+grep -q 'Worker launch: `codex --dangerously-bypass-approvals-and-sandbox`' "$generic_defaults_summary"
+grep -q 'Inspector launch: `codex --dangerously-bypass-approvals-and-sandbox`' "$generic_defaults_summary"
+grep -q 'Setup platforms: `codex`' "$generic_defaults_summary"
+grep -q '| 0 | `manager` | `codex --dangerously-bypass-approvals-and-sandbox` | `/squad manager` |' "$generic_defaults_map"
+
+role_args_repo="$tmpdir/role-args-repo"
+mkdir -p "$role_args_repo/.squad"
+git -C "$tmpdir" init -b main role-args-repo >/dev/null
+git -C "$role_args_repo" config user.email "codex@example.com"
+git -C "$role_args_repo" config user.name "Codex"
+echo "role-args" >"$role_args_repo/README.md"
+git -C "$role_args_repo" add README.md
+git -C "$role_args_repo" commit -m "seed" >/dev/null
+
+cat >"$role_args_repo/.squad/launcher.yaml" <<'EOF'
+runtime:
+  claude_command: claude
+  claude_args:
+    - --dangerously-skip-permissions
+  manager_command: codex
+EOF
+
+cat >"$role_args_repo/.squad/run-task.md" <<'EOF'
+# Task
+Ensure role-specific command does not inherit claude args by default.
+EOF
+
+bash "$launcher" "$role_args_repo" --dry-run --no-setup --no-attach >/dev/null
+
+role_args_summary="$role_args_repo/.squad/quickstart/generated-run-summary.md"
+grep -q 'Manager launch: `codex`' "$role_args_summary"
+if grep -q 'Manager launch: `codex --dangerously-skip-permissions`' "$role_args_summary"; then
+  echo "manager role unexpectedly inherited global claude args" >&2
+  exit 1
+fi
+
 same_name_roots=()
 for org in org-a org-b; do
   repo_dir="$tmpdir/$org/demo"
@@ -176,5 +285,284 @@ EOF
 
 HOME="$tmpdir/home" bash "$launcher" "$tilde_repo" --dry-run --no-setup --no-attach >/dev/null
 grep -q "$tmpdir/home/bin/claude --dangerously-skip-permissions" "$tilde_repo/.squad/quickstart/generated-run-summary.md"
+
+superpowers_repo="$tmpdir/superpowers-repo"
+mkdir -p "$superpowers_repo/.squad" "$superpowers_repo/docs/superpowers/specs" "$superpowers_repo/docs/superpowers/plans"
+git -C "$tmpdir" init -b main superpowers-repo >/dev/null
+git -C "$superpowers_repo" config user.email "codex@example.com"
+git -C "$superpowers_repo" config user.name "Codex"
+echo "superpowers" >"$superpowers_repo/README.md"
+git -C "$superpowers_repo" add README.md
+git -C "$superpowers_repo" commit -m "seed" >/dev/null
+
+cat >"$superpowers_repo/.squad/launcher.yaml" <<'EOF'
+project:
+  name: superpowers-demo
+EOF
+
+cat >"$superpowers_repo/docs/superpowers/specs/2026-03-29-older-flow-design.md" <<'EOF'
+# Older Flow Design
+This should not be selected.
+EOF
+
+cat >"$superpowers_repo/docs/superpowers/plans/2026-03-29-older-flow-implementation.md" <<'EOF'
+# Older Flow Implementation Plan
+This should not be selected.
+EOF
+
+cat >"$superpowers_repo/docs/superpowers/specs/2026-03-30-minimal-qr-connect-surface-design.md" <<'EOF'
+# Minimal QR Connect Surface Design
+
+## Goal
+Finish the remaining product-facing QR connection path.
+EOF
+
+cat >"$superpowers_repo/docs/superpowers/plans/2026-03-30-minimal-qr-connect-surface-implementation.md" <<'EOF'
+# Minimal QR Connect Surface Implementation Plan
+
+## Task 1
+Implement the QR connect surface.
+EOF
+
+bash "$launcher" "$superpowers_repo" --dry-run --no-setup --no-attach >/dev/null
+
+superpowers_prompt="$superpowers_repo/.squad/quickstart/generated-manager.prompt.md"
+superpowers_inspector_prompt="$superpowers_repo/.squad/quickstart/generated-inspector.prompt.md"
+superpowers_summary="$superpowers_repo/.squad/quickstart/generated-run-summary.md"
+
+test -f "$superpowers_prompt"
+test -f "$superpowers_inspector_prompt"
+test -f "$superpowers_summary"
+grep -q "Minimal QR Connect Surface Implementation Plan" "$superpowers_prompt"
+grep -q "Minimal QR Connect Surface Design" "$superpowers_prompt"
+grep -q "Finish the remaining product-facing QR connection path" "$superpowers_prompt"
+grep -q "Minimal QR Connect Surface Implementation Plan" "$superpowers_inspector_prompt"
+grep -q "docs/superpowers/plans/2026-03-30-minimal-qr-connect-surface-implementation.md" "$superpowers_summary"
+grep -q "docs/superpowers/specs/2026-03-30-minimal-qr-connect-surface-design.md" "$superpowers_summary"
+
+custom_discovery_repo="$tmpdir/custom-discovery-repo"
+mkdir -p "$custom_discovery_repo/.squad" "$custom_discovery_repo/workitems/plans" "$custom_discovery_repo/workitems/specifications"
+git -C "$tmpdir" init -b main custom-discovery-repo >/dev/null
+git -C "$custom_discovery_repo" config user.email "codex@example.com"
+git -C "$custom_discovery_repo" config user.name "Codex"
+echo "custom" >"$custom_discovery_repo/README.md"
+git -C "$custom_discovery_repo" add README.md
+git -C "$custom_discovery_repo" commit -m "seed" >/dev/null
+
+cat >"$custom_discovery_repo/.squad/launcher.yaml" <<'EOF'
+project:
+  name: custom-discovery-demo
+
+task_discovery:
+  plan_globs:
+    - workitems/plans/*-plan.md
+  spec_globs:
+    - workitems/specifications/*-spec.md
+  plan_suffix: -plan.md
+  spec_suffix: -spec.md
+EOF
+
+cat >"$custom_discovery_repo/workitems/specifications/2026-03-29-older-flow-spec.md" <<'EOF'
+# Older Flow Spec
+Do not select this spec.
+EOF
+
+cat >"$custom_discovery_repo/workitems/plans/2026-03-29-older-flow-plan.md" <<'EOF'
+# Older Flow Plan
+Do not select this plan.
+EOF
+
+cat >"$custom_discovery_repo/workitems/specifications/2026-03-31-remote-control-gateway-spec.md" <<'EOF'
+# Remote Control Gateway Spec
+
+## Goal
+Keep arbitrary discovery layouts configurable.
+EOF
+
+cat >"$custom_discovery_repo/workitems/plans/2026-03-31-remote-control-gateway-plan.md" <<'EOF'
+# Remote Control Gateway Plan
+
+## Task 1
+Support configurable plan/spec discovery.
+EOF
+
+bash "$launcher" "$custom_discovery_repo" --dry-run --no-setup --no-attach >/dev/null
+
+custom_prompt="$custom_discovery_repo/.squad/quickstart/generated-manager.prompt.md"
+custom_inspector_prompt="$custom_discovery_repo/.squad/quickstart/generated-inspector.prompt.md"
+custom_summary="$custom_discovery_repo/.squad/quickstart/generated-run-summary.md"
+
+test -f "$custom_prompt"
+test -f "$custom_inspector_prompt"
+test -f "$custom_summary"
+grep -q "Remote Control Gateway Plan" "$custom_prompt"
+grep -q "Remote Control Gateway Spec" "$custom_prompt"
+grep -q "Keep arbitrary discovery layouts configurable" "$custom_prompt"
+grep -q "Remote Control Gateway Plan" "$custom_inspector_prompt"
+grep -q "workitems/plans/2026-03-31-remote-control-gateway-plan.md" "$custom_summary"
+grep -q "workitems/specifications/2026-03-31-remote-control-gateway-spec.md" "$custom_summary"
+
+custom_sort_repo="$tmpdir/custom-sort-repo"
+mkdir -p "$custom_sort_repo/.squad" "$custom_sort_repo/a/plans" "$custom_sort_repo/z/plans" "$custom_sort_repo/a/specs" "$custom_sort_repo/z/specs"
+git -C "$tmpdir" init -b main custom-sort-repo >/dev/null
+git -C "$custom_sort_repo" config user.email "codex@example.com"
+git -C "$custom_sort_repo" config user.name "Codex"
+echo "sort" >"$custom_sort_repo/README.md"
+git -C "$custom_sort_repo" add README.md
+git -C "$custom_sort_repo" commit -m "seed" >/dev/null
+
+cat >"$custom_sort_repo/.squad/launcher.yaml" <<'EOF'
+task_discovery:
+  plan_globs:
+    - a/plans/*-plan.md
+    - z/plans/*-plan.md
+  spec_globs:
+    - a/specs/*-spec.md
+    - z/specs/*-spec.md
+  plan_suffix: -plan.md
+  spec_suffix: -spec.md
+EOF
+
+cat >"$custom_sort_repo/a/plans/2026-04-01-newer-plan.md" <<'EOF'
+# Newer Plan
+EOF
+
+cat >"$custom_sort_repo/a/specs/2026-04-01-newer-spec.md" <<'EOF'
+# Newer Spec
+EOF
+
+cat >"$custom_sort_repo/z/plans/2026-03-01-older-plan.md" <<'EOF'
+# Older Plan
+EOF
+
+cat >"$custom_sort_repo/z/specs/2026-03-01-older-spec.md" <<'EOF'
+# Older Spec
+EOF
+
+bash "$launcher" "$custom_sort_repo" --dry-run --no-setup --no-attach >/dev/null
+
+custom_sort_prompt="$custom_sort_repo/.squad/quickstart/generated-manager.prompt.md"
+custom_sort_summary="$custom_sort_repo/.squad/quickstart/generated-run-summary.md"
+
+grep -q "Newer Plan" "$custom_sort_prompt"
+grep -q "Newer Spec" "$custom_sort_prompt"
+grep -q "a/plans/2026-04-01-newer-plan.md" "$custom_sort_summary"
+grep -q "a/specs/2026-04-01-newer-spec.md" "$custom_sort_summary"
+
+subproject_repo="$tmpdir/subproject-repo"
+mkdir -p "$subproject_repo/subproj/.squad" "$subproject_repo/workitems/plans"
+git -C "$tmpdir" init -b main subproject-repo >/dev/null
+git -C "$subproject_repo" config user.email "codex@example.com"
+git -C "$subproject_repo" config user.name "Codex"
+echo "subproject" >"$subproject_repo/README.md"
+git -C "$subproject_repo" add README.md
+git -C "$subproject_repo" commit -m "seed" >/dev/null
+
+cat >"$subproject_repo/subproj/.squad/launcher.yaml" <<'EOF'
+project:
+  name: subproj
+
+task_discovery:
+  plan_globs:
+    - workitems/plans/*-plan.md
+  spec_globs:
+    - workitems/specifications/*-spec.md
+  plan_suffix: -plan.md
+  spec_suffix: -spec.md
+EOF
+
+cat >"$subproject_repo/workitems/plans/2026-04-01-root-plan.md" <<'EOF'
+# Root Plan
+EOF
+
+set +e
+subproject_output="$(bash "$launcher" "$subproject_repo/subproj" --dry-run --no-setup --no-attach 2>&1)"
+subproject_status=$?
+set -e
+
+if (( subproject_status == 0 )); then
+  echo "Expected custom discovery to stay within subproject config root" >&2
+  exit 1
+fi
+
+printf '%s\n' "$subproject_output" | grep -q "configure task_discovery.plan_globs"
+if printf '%s\n' "$subproject_output" | grep -q "Root Plan"; then
+  echo "Unexpectedly selected repo-root plan for subproject launcher config" >&2
+  exit 1
+fi
+
+taskfile_repo="$tmpdir/taskfile-repo"
+mkdir -p "$taskfile_repo/subproj/.squad" "$taskfile_repo/subproj/workitems/plans" "$taskfile_repo/subproj/workitems/specifications"
+git -C "$tmpdir" init -b main taskfile-repo >/dev/null
+git -C "$taskfile_repo" config user.email "codex@example.com"
+git -C "$taskfile_repo" config user.name "Codex"
+echo "taskfile" >"$taskfile_repo/README.md"
+git -C "$taskfile_repo" add README.md
+git -C "$taskfile_repo" commit -m "seed" >/dev/null
+
+cat >"$taskfile_repo/subproj/.squad/launcher.yaml" <<'EOF'
+task_discovery:
+  plan_globs:
+    - workitems/plans/*-plan.md
+  spec_globs:
+    - workitems/specifications/*-spec.md
+  plan_suffix: -plan.md
+  spec_suffix: -spec.md
+EOF
+
+cat >"$taskfile_repo/subproj/workitems/plans/2026-04-01-demo-plan.md" <<'EOF'
+# Demo Plan
+EOF
+
+cat >"$taskfile_repo/subproj/workitems/specifications/2026-04-01-demo-spec.md" <<'EOF'
+# Demo Spec
+EOF
+
+bash "$launcher" "$taskfile_repo/subproj" --task-file "$taskfile_repo/subproj/workitems/plans/2026-04-01-demo-plan.md" --dry-run --no-setup --no-attach >/dev/null
+
+taskfile_prompt="$taskfile_repo/subproj/.squad/quickstart/generated-manager.prompt.md"
+taskfile_summary="$taskfile_repo/subproj/.squad/quickstart/generated-run-summary.md"
+
+grep -q "Demo Plan" "$taskfile_prompt"
+grep -q "Demo Spec" "$taskfile_prompt"
+grep -q "subproj/workitems/specifications/2026-04-01-demo-spec.md" "$taskfile_summary"
+
+escape_repo="$tmpdir/escape-repo"
+mkdir -p "$escape_repo/.squad" "$tmpdir/outside-docs/plans"
+git -C "$tmpdir" init -b main escape-repo >/dev/null
+git -C "$escape_repo" config user.email "codex@example.com"
+git -C "$escape_repo" config user.name "Codex"
+echo "escape" >"$escape_repo/README.md"
+git -C "$escape_repo" add README.md
+git -C "$escape_repo" commit -m "seed" >/dev/null
+
+cat >"$escape_repo/.squad/launcher.yaml" <<'EOF'
+task_discovery:
+  plan_globs:
+    - ../outside-docs/plans/*-plan.md
+  plan_suffix: -plan.md
+EOF
+
+cat >"$tmpdir/outside-docs/plans/2026-04-01-escaped-plan.md" <<'EOF'
+# Escaped Plan
+EOF
+
+set +e
+escape_output="$(bash "$launcher" "$escape_repo" --dry-run --no-setup --no-attach 2>&1)"
+escape_rc=$?
+set -e
+
+if (( escape_rc == 0 )); then
+  echo "Expected task discovery globs to stay within project-dir" >&2
+  exit 1
+fi
+
+printf '%s\n' "$escape_output" | grep -q "configure task_discovery.plan_globs"
+if [[ -f "$escape_repo/.squad/quickstart/generated-manager.prompt.md" ]]; then
+  if grep -q "Escaped Plan" "$escape_repo/.squad/quickstart/generated-manager.prompt.md"; then
+    echo "Unexpectedly selected escaped plan outside project-dir" >&2
+    exit 1
+  fi
+fi
 
 echo "PASS: generic launcher dry-run generated expected files"

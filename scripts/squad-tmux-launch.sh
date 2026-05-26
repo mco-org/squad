@@ -18,18 +18,28 @@ Options:
   --worktree-base <ref>   Base ref for new worktree branches (default: HEAD)
   --worktree-location <path> Override worktree parent directory
   --no-worktree           Disable worktree mode even if config enables it
-  --no-setup              Skip `squad setup claude`
+  --no-setup              Skip `squad setup` for detected clients
   --no-attach             Create/start session but do not attach
-  --dry-run               Generate prompt/summary/map only; do not run squad/tmux/claude
+  --dry-run               Generate prompt/summary/map only; do not run squad/tmux/clients
   --reuse-session         Reuse an existing tmux session instead of failing
   -h, --help              Show this help
 
 Task source priority:
   1. --task-file <path>
   2. <project-dir>/.squad/run-task.md
+  3. task_discovery.plan_globs / spec_globs from .squad/launcher.yaml
+     or the default docs/superpowers/plans/YYYY-MM-DD-*-implementation.md
+     plus the newest matching spec
 
 Project config:
   <project-dir>/.squad/launcher.yaml
+
+Client config:
+  runtime.command / runtime.args         Default client command for all panes
+  runtime.manager_command / *_args       Manager-specific override
+  runtime.worker_command / *_args        Worker-specific override
+  runtime.inspector_command / *_args     Inspector-specific override
+  Legacy aliases runtime.claude_command / runtime.claude_args are still supported
 
 Worktree config:
   <project-dir>/.squad/launcher.yaml -> workspace.worktree
@@ -130,6 +140,67 @@ send_tmux_text() {
   tmux delete-buffer
 }
 
+capture_pane_text() {
+  local target="$1"
+  tmux capture-pane -t "$target" -p -S -120
+}
+
+wait_for_pane_ready() {
+  local target="$1"
+  local timeout_secs="$2"
+  local start_ts
+  start_ts="$(date +%s)"
+
+  while true; do
+    local capture=""
+    capture="$(capture_pane_text "$target")"
+
+    if pane_capture_has_workspace_trust_prompt "$capture"; then
+      tmux send-keys -t "$target" Enter
+      sleep 1
+      continue
+    fi
+
+    if pane_capture_has_interactive_prompt "$capture"; then
+      return 0
+    fi
+
+    if (( "$(date +%s)" - start_ts >= timeout_secs )); then
+      echo "Error: pane $target did not reach an interactive Claude prompt within ${timeout_secs}s" >&2
+      return 1
+    fi
+
+    sleep 1
+  done
+}
+
+resubmit_pending_squad_command_if_needed() {
+  local target="$1"
+  local command_text="$2"
+  local capture=""
+  capture="$(capture_pane_text "$target")"
+
+  if pane_capture_has_workspace_trust_prompt "$capture"; then
+    tmux send-keys -t "$target" Enter
+    return 0
+  fi
+
+  if pane_capture_has_pending_command_input "$capture" "$command_text" && ! pane_capture_has_squad_command_activity "$capture"; then
+    tmux send-keys -t "$target" Enter
+    return 0
+  fi
+
+  return 1
+}
+
+current_agent_count() {
+  local workspace="$1"
+  (
+    cd "$workspace"
+    squad agents --json 2>/dev/null || true
+  ) | awk 'NF { count += 1 } END { print count + 0 }'
+}
+
 load_launcher_config() {
   local config_path="$1"
   if [[ ! -f "$config_path" ]]; then
@@ -178,10 +249,37 @@ def emit_array(name, value)
   puts ")"
 end
 
+def key_present?(hash, *keys)
+  current = hash
+  keys.each do |key|
+    return false unless current.is_a?(Hash)
+    if current.key?(key)
+      current = current[key]
+    elsif current.key?(key.to_sym)
+      current = current[key.to_sym]
+    else
+      return false
+    end
+  end
+  true
+end
+
 emit_scalar("CFG_PROJECT_NAME", lookup(data, "project", "name"))
 emit_scalar("CFG_SESSION_NAME", lookup(data, "project", "session_name"))
+emit_scalar("CFG_DEFAULT_COMMAND", lookup(data, "runtime", "command"))
+emit_array("CFG_DEFAULT_ARGS", lookup(data, "runtime", "args"))
+emit_scalar("CFG_DEFAULT_ARGS_SET", key_present?(data, "runtime", "args") ? "true" : "")
 emit_scalar("CFG_CLAUDE_COMMAND", lookup(data, "runtime", "claude_command"))
 emit_array("CFG_CLAUDE_ARGS", lookup(data, "runtime", "claude_args"))
+emit_scalar("CFG_MANAGER_COMMAND", lookup(data, "runtime", "manager_command"))
+emit_array("CFG_MANAGER_ARGS", lookup(data, "runtime", "manager_args"))
+emit_scalar("CFG_MANAGER_ARGS_SET", key_present?(data, "runtime", "manager_args") ? "true" : "")
+emit_scalar("CFG_WORKER_COMMAND", lookup(data, "runtime", "worker_command"))
+emit_array("CFG_WORKER_ARGS", lookup(data, "runtime", "worker_args"))
+emit_scalar("CFG_WORKER_ARGS_SET", key_present?(data, "runtime", "worker_args") ? "true" : "")
+emit_scalar("CFG_INSPECTOR_COMMAND", lookup(data, "runtime", "inspector_command"))
+emit_array("CFG_INSPECTOR_ARGS", lookup(data, "runtime", "inspector_args"))
+emit_scalar("CFG_INSPECTOR_ARGS_SET", key_present?(data, "runtime", "inspector_args") ? "true" : "")
 emit_scalar("CFG_MANAGER_ROLE", lookup(data, "runtime", "manager_role"))
 emit_scalar("CFG_WORKER_ROLE", lookup(data, "runtime", "worker_role"))
 emit_scalar("CFG_INSPECTOR_ROLE", lookup(data, "runtime", "inspector_role"))
@@ -192,11 +290,281 @@ emit_scalar("CFG_WORKTREE_LOCATION", lookup(data, "workspace", "worktree", "loca
 emit_scalar("CFG_WORKTREE_PATH", lookup(data, "workspace", "worktree", "path"))
 emit_scalar("CFG_WORKTREE_BRANCH", lookup(data, "workspace", "worktree", "branch"))
 emit_scalar("CFG_WORKTREE_BASE_REF", lookup(data, "workspace", "worktree", "base_ref"))
+emit_array("CFG_TASK_DISCOVERY_PLAN_GLOBS", lookup(data, "task_discovery", "plan_globs"))
+emit_array("CFG_TASK_DISCOVERY_SPEC_GLOBS", lookup(data, "task_discovery", "spec_globs"))
+emit_scalar("CFG_TASK_DISCOVERY_PLAN_SUFFIX", lookup(data, "task_discovery", "plan_suffix"))
+emit_scalar("CFG_TASK_DISCOVERY_SPEC_SUFFIX", lookup(data, "task_discovery", "spec_suffix"))
 emit_array("CFG_FOCUS_FILES", lookup(data, "focus", "files"))
 emit_array("CFG_FOCUS_DOCS", lookup(data, "focus", "docs"))
 emit_array("CFG_CONSTRAINTS", lookup(data, "constraints"))
 RUBY
   )"
+}
+
+latest_matching_doc() {
+  local dir="$1"
+  local pattern="$2"
+  [[ -d "$dir" ]] || return 1
+
+  find "$dir" -maxdepth 1 -type f -name "$pattern" | LC_ALL=C sort | tail -n 1
+}
+
+latest_matching_glob_patterns() {
+  local root="$1"
+  shift
+  [[ -d "$root" ]] || return 1
+  (( $# > 0 )) || return 1
+
+  require_cmd ruby
+
+  ruby - "$root" "$@" <<'RUBY'
+root_arg = ARGV.shift
+root = begin
+  File.realpath(root_arg)
+rescue StandardError
+  File.expand_path(root_arg)
+end
+patterns = ARGV
+matches = patterns.flat_map { |pattern| Dir.glob(File.join(root, pattern), File::FNM_EXTGLOB) }
+  .select do |path|
+    next false unless File.file?(path)
+    expanded = begin
+      File.realpath(path)
+    rescue StandardError
+      File.expand_path(path)
+    end
+    expanded == root || expanded.start_with?(root + "/")
+  end
+  .uniq
+  .sort_by { |path| [File.basename(path), path] }
+puts matches.last if matches.any?
+RUBY
+}
+
+all_matching_glob_patterns() {
+  local root="$1"
+  shift
+  [[ -d "$root" ]] || return 1
+  (( $# > 0 )) || return 1
+
+  require_cmd ruby
+
+  ruby - "$root" "$@" <<'RUBY'
+root_arg = ARGV.shift
+root = begin
+  File.realpath(root_arg)
+rescue StandardError
+  File.expand_path(root_arg)
+end
+patterns = ARGV
+matches = patterns.flat_map { |pattern| Dir.glob(File.join(root, pattern), File::FNM_EXTGLOB) }
+  .select do |path|
+    next false unless File.file?(path)
+    expanded = begin
+      File.realpath(path)
+    rescue StandardError
+      File.expand_path(path)
+    end
+    expanded == root || expanded.start_with?(root + "/")
+  end
+  .uniq
+  .sort_by { |path| [File.basename(path), path] }
+puts matches
+RUBY
+}
+
+path_matches_glob_patterns() {
+  local root="$1"
+  local candidate="$2"
+  shift 2
+  (( $# > 0 )) || return 1
+  [[ -d "$root" ]] || return 1
+
+  require_cmd ruby
+
+  ruby - "$root" "$candidate" "$@" <<'RUBY'
+root = File.expand_path(ARGV.shift)
+candidate = File.expand_path(ARGV.shift)
+patterns = ARGV
+
+begin
+  relative = candidate.delete_prefix(root + "/")
+  if relative == candidate || relative.empty?
+    exit 1
+  end
+
+  matched = patterns.any? do |pattern|
+    Dir.glob(File.join(root, pattern), File::FNM_EXTGLOB).any? do |path|
+      File.expand_path(path) == candidate
+    end
+  end
+
+  exit(matched ? 0 : 1)
+rescue StandardError
+  exit 1
+end
+RUBY
+}
+
+doc_topic_slug() {
+  local file_path="$1"
+  local suffix="$2"
+  local name=""
+  name="$(basename "$file_path")"
+
+  if [[ -n "$suffix" && "$name" == *"$suffix" ]]; then
+    name="${name%"$suffix"}"
+  else
+    name="${name%.md}"
+  fi
+
+  if [[ "$name" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-(.+)$ ]]; then
+    name="${BASH_REMATCH[1]}"
+  fi
+
+  [[ -n "$name" ]] || return 1
+  printf '%s' "$name"
+}
+
+matching_spec_from_patterns() {
+  local plan_file="$1"
+  local topic_slug=""
+  local root="$2"
+  shift 2
+  local -a patterns=("$@")
+  local candidate=""
+  local candidate_slug=""
+  local latest=""
+
+  topic_slug="$(doc_topic_slug "$plan_file" "$task_discovery_plan_suffix")" || return 1
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    candidate_slug="$(doc_topic_slug "$candidate" "$task_discovery_spec_suffix" || true)"
+    if [[ -n "$candidate_slug" && "$candidate_slug" == "$topic_slug" ]]; then
+      latest="$candidate"
+    fi
+  done < <(all_matching_glob_patterns "$root" "${patterns[@]}" 2>/dev/null || true)
+
+  if [[ -n "$latest" ]]; then
+    printf '%s\n' "$latest"
+  else
+    return 1
+  fi
+}
+
+latest_matching_spec_for_plan() {
+  local plan_file="$1"
+  local root="$2"
+
+  if (( ${#task_discovery_spec_globs[@]} > 0 )); then
+    matching_spec_from_patterns "$plan_file" "$root" "${task_discovery_spec_globs[@]}"
+    return
+  fi
+
+  local specs_dir="$root/docs/superpowers/specs"
+  local topic_slug=""
+  topic_slug="$(doc_topic_slug "$plan_file" "$task_discovery_plan_suffix")" || return 1
+  latest_matching_doc "$specs_dir" "????-??-??-${topic_slug}${task_discovery_spec_suffix}"
+}
+
+looks_like_plan_file() {
+  local file_path="$1"
+  local base_name
+  base_name="$(basename "$file_path")"
+  [[ -n "$task_discovery_plan_suffix" && "$base_name" == *"$task_discovery_plan_suffix" ]]
+}
+
+resolve_discovery_candidate() {
+  local root="$1"
+
+  if (( ${#task_discovery_plan_globs[@]} > 0 )); then
+    latest_matching_glob_patterns "$root" "${task_discovery_plan_globs[@]}"
+  else
+    latest_matching_doc "$root/docs/superpowers/plans" "????-??-??-*${task_discovery_plan_suffix}"
+  fi
+}
+
+discovery_root_for_plan_file() {
+  local plan_file="$1"
+  local project_dir="$2"
+  local repo_root="$3"
+
+  if (( ${#task_discovery_plan_globs[@]} > 0 )); then
+    if path_matches_glob_patterns "$project_dir" "$plan_file" "${task_discovery_plan_globs[@]}"; then
+      printf '%s\n' "$project_dir"
+      return 0
+    fi
+    return 1
+  fi
+
+  if [[ "$plan_file" == "$project_dir"/docs/superpowers/plans/*"$task_discovery_plan_suffix" ]]; then
+    printf '%s\n' "$project_dir"
+    return 0
+  fi
+
+  if [[ -n "$repo_root" && "$repo_root" != "$project_dir" ]] && [[ "$plan_file" == "$repo_root"/docs/superpowers/plans/*"$task_discovery_plan_suffix" ]]; then
+    printf '%s\n' "$repo_root"
+    return 0
+  fi
+
+  return 1
+}
+
+resolve_task_sources() {
+  local project_dir="$1"
+  local task_override="$2"
+  local default_task_file="$3"
+  local repo_root="$4"
+  local candidate=""
+  local root=""
+  local -a search_roots=()
+
+  task_source_kind="task-brief"
+  task_source_path=""
+  task_supporting_spec_path=""
+  task_source_root=""
+
+  if [[ -n "$task_override" ]]; then
+    task_source_path="$task_override"
+    if [[ ! -f "$task_source_path" ]]; then
+      echo "Error: task brief not found: $task_source_path" >&2
+      echo "Provide --task-file <path> or create $default_task_file" >&2
+      exit 1
+    fi
+  elif [[ -f "$default_task_file" ]]; then
+    task_source_path="$default_task_file"
+  else
+    search_roots=("$project_dir")
+    if (( ${#task_discovery_plan_globs[@]} == 0 )) && [[ -n "$repo_root" && "$repo_root" != "$project_dir" ]]; then
+      search_roots+=("$repo_root")
+    fi
+
+    for root in "${search_roots[@]}"; do
+      candidate="$(resolve_discovery_candidate "$root" || true)"
+      if [[ -n "$candidate" ]]; then
+        task_source_kind="superpowers-plan"
+        task_source_path="$candidate"
+        task_source_root="$root"
+        task_supporting_spec_path="$(latest_matching_spec_for_plan "$candidate" "$root" || true)"
+        break
+      fi
+    done
+
+    if [[ -z "$task_source_path" ]]; then
+      echo "Error: task brief not found: $default_task_file" >&2
+      echo "Provide --task-file <path>, create $default_task_file, or configure task_discovery.plan_globs in $launcher_config" >&2
+      exit 1
+    fi
+  fi
+
+  if [[ "$task_source_kind" == "task-brief" ]] && looks_like_plan_file "$task_source_path"; then
+    task_source_kind="superpowers-plan"
+    task_source_root="$(discovery_root_for_plan_file "$task_source_path" "$project_dir" "$repo_root" || true)"
+    if [[ -z "$task_source_root" ]]; then
+      task_source_root="$project_dir"
+    fi
+    task_supporting_spec_path="$(latest_matching_spec_for_plan "$task_source_path" "$task_source_root" || true)"
+  fi
 }
 
 build_manager_prompt() {
@@ -255,6 +623,21 @@ build_manager_prompt() {
       echo
     fi
 
+    echo "## Input Sources"
+    echo "- Primary task source: \`$task_source_path\`"
+    if [[ "$task_source_kind" == "superpowers-plan" ]]; then
+      echo "- Primary type: \`implementation-plan\`"
+      if [[ -n "$task_supporting_spec_path" ]]; then
+        echo "- Supporting spec: \`$task_supporting_spec_path\`"
+      fi
+      if [[ -n "$task_source_root" ]]; then
+        echo "- Source root: \`$task_source_root\`"
+      fi
+    else
+      echo "- Primary type: \`task-brief\`"
+    fi
+    echo
+
     cat <<'EOF'
 ## Execution Principles
 - Start with read-only analysis and build a baseline before assigning work.
@@ -264,11 +647,23 @@ build_manager_prompt() {
 - Every completed worker task should be reviewed by the inspector.
 - Do not validate only the happy path; cover failures, fallback behavior, recovery, and regressions.
 - If worktree mode is enabled, all code changes, tests, and commits must happen in `Workspace root`.
-
-## Task Brief
 EOF
     echo
-    cat "$task_file"
+    if [[ "$task_source_kind" == "superpowers-plan" ]]; then
+      echo "## Implementation Plan"
+      echo
+      cat "$task_file"
+      if [[ -n "$task_supporting_spec_path" ]]; then
+        echo
+        echo "## Supporting Spec"
+        echo
+        cat "$task_supporting_spec_path"
+      fi
+    else
+      echo "## Task Brief"
+      echo
+      cat "$task_file"
+    fi
   } >"$output_path"
 }
 
@@ -333,16 +728,26 @@ EOF
       echo
     fi
 
-    cat <<'EOF'
-## Task Brief
-EOF
-    echo
-    cat "$task_file"
+    if [[ "$task_source_kind" == "superpowers-plan" ]]; then
+      echo "## Implementation Plan"
+      echo
+      cat "$task_file"
+      if [[ -n "$task_supporting_spec_path" ]]; then
+        echo
+        echo "## Supporting Spec"
+        echo
+        cat "$task_supporting_spec_path"
+      fi
+    else
+      echo "## Task Brief"
+      echo
+      cat "$task_file"
+    fi
 
     if [[ ! -f "$inspector_source" ]]; then
       cat <<'EOF'
 ## Review Checklist
-Use the task brief above to confirm:
+Use the task material above to confirm:
 - the implementation satisfies the goal rather than only making tests pass
 - no behavior regressions or compatibility breaks were introduced
 - README, configuration guidance, and diagnostics still match the implementation
@@ -362,9 +767,17 @@ build_run_summary() {
     echo "- Workspace root: \`$workspace_dir\`"
     echo "- Session: \`$session_name\`"
     echo "- Task file: \`$task_file\`"
+    echo "- Task source kind: \`$task_source_kind\`"
+    echo "- Task source path: \`$task_source_path\`"
+    echo "- Supporting spec path: \`$task_supporting_spec_path\`"
+    echo "- Task source root: \`$task_source_root\`"
     echo "- Inspector prompt source: \`$inspector_prompt_source\`"
     echo "- Launcher config: \`$launcher_config\`"
-    echo "- Claude launch: \`$claude_launch_command\`"
+    echo "- Default client launch: \`$default_launch_command\`"
+    echo "- Manager launch: \`$manager_launch_command\`"
+    echo "- Worker launch: \`$worker_launch_command\`"
+    echo "- Inspector launch: \`$inspector_launch_command\`"
+    echo "- Setup platforms: \`${setup_platforms_display:-none}\`"
     echo "- Workers: \`$workers\`"
     echo "- Dry run: \`$dry_run\`"
     echo "- No setup: \`$no_setup\`"
@@ -393,12 +806,67 @@ build_terminal_map() {
     echo "- tmux session: \`$session_name\`"
     echo "- workspace: \`$workspace_dir\`"
     echo
-    echo "| Pane | Role | Command |"
-    echo "| --- | --- | --- |"
+    echo "| Pane | Role | Launch | Slash Command |"
+    echo "| --- | --- | --- | --- |"
     for i in "${!pane_labels[@]}"; do
-      echo "| $i | \`${pane_labels[$i]}\` | \`${pane_commands[$i]}\` |"
+      echo "| $i | \`${pane_labels[$i]}\` | \`${pane_launch_display[$i]}\` | \`${pane_commands[$i]}\` |"
     done
   } >"$output_path"
+}
+
+join_with_comma_space() {
+  local joined=""
+  local item=""
+  for item in "$@"; do
+    if [[ -n "$joined" ]]; then
+      joined+=", "
+    fi
+    joined+="$item"
+  done
+  printf '%s' "$joined"
+}
+
+platform_for_command() {
+  local command_name="$1"
+  local base=""
+  base="$(basename "$command_name")"
+  case "$base" in
+    claude|claude-code)
+      printf '%s' "claude"
+      ;;
+    codex|codex-cli)
+      printf '%s' "codex"
+      ;;
+    gemini)
+      printf '%s' "gemini"
+      ;;
+    opencode)
+      printf '%s' "opencode"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+add_unique_item() {
+  local value="$1"
+  local array_name="${2:-unique_items}"
+  local item=""
+  local count=0
+  [[ -n "$value" ]] || return 0
+  if ! declare -p "$array_name" >/dev/null 2>&1; then
+    eval "$array_name=()"
+  fi
+  eval "count=\${#$array_name[@]}"
+  if (( count > 0 )); then
+    eval 'for item in "${'"$array_name"'[@]}"; do
+      if [[ "$item" == "$value" ]]; then
+        return 0
+      fi
+    done'
+  fi
+  eval "$array_name+=(\"\$value\")"
 }
 
 no_setup=0
@@ -500,18 +968,23 @@ source_project_dir="$project_dir"
 
 launcher_config="$project_dir/.squad/launcher.yaml"
 default_task_file="$project_dir/.squad/run-task.md"
-task_file="${task_file_override:-$default_task_file}"
-
-if [[ ! -f "$task_file" ]]; then
-  echo "Error: task brief not found: $task_file" >&2
-  echo "Provide --task-file <path> or create $default_task_file" >&2
-  exit 1
-fi
-
+detected_repo_root="$(git -C "$project_dir" rev-parse --show-toplevel 2>/dev/null || true)"
 CFG_PROJECT_NAME=""
 CFG_SESSION_NAME=""
+CFG_DEFAULT_COMMAND=""
+CFG_DEFAULT_ARGS=()
+CFG_DEFAULT_ARGS_SET=""
 CFG_CLAUDE_COMMAND=""
 CFG_CLAUDE_ARGS=()
+CFG_MANAGER_COMMAND=""
+CFG_MANAGER_ARGS=()
+CFG_MANAGER_ARGS_SET=""
+CFG_WORKER_COMMAND=""
+CFG_WORKER_ARGS=()
+CFG_WORKER_ARGS_SET=""
+CFG_INSPECTOR_COMMAND=""
+CFG_INSPECTOR_ARGS=()
+CFG_INSPECTOR_ARGS_SET=""
 CFG_MANAGER_ROLE=""
 CFG_WORKER_ROLE=""
 CFG_INSPECTOR_ROLE=""
@@ -522,6 +995,10 @@ CFG_WORKTREE_LOCATION=""
 CFG_WORKTREE_PATH=""
 CFG_WORKTREE_BRANCH=""
 CFG_WORKTREE_BASE_REF=""
+CFG_TASK_DISCOVERY_PLAN_GLOBS=()
+CFG_TASK_DISCOVERY_SPEC_GLOBS=()
+CFG_TASK_DISCOVERY_PLAN_SUFFIX=""
+CFG_TASK_DISCOVERY_SPEC_SUFFIX=""
 CFG_FOCUS_FILES=()
 CFG_FOCUS_DOCS=()
 CFG_CONSTRAINTS=()
@@ -531,12 +1008,8 @@ load_launcher_config "$launcher_config"
 project_name="${CFG_PROJECT_NAME:-$(basename "$project_dir")}"
 session_name="${session_name_override:-${CFG_SESSION_NAME:-${project_name}-squad}}"
 session_name="$(normalize_session_name "$session_name")"
-claude_command="${CFG_CLAUDE_COMMAND:-claude}"
-if [[ "$claude_command" == "~" ]]; then
-  claude_command="$HOME"
-elif [[ "${claude_command:0:2}" == "~/" ]]; then
-  claude_command="$HOME/${claude_command:2}"
-fi
+default_command="${CFG_DEFAULT_COMMAND:-${CFG_CLAUDE_COMMAND:-claude}}"
+default_command="$(expand_home_path "$default_command")"
 manager_role="${CFG_MANAGER_ROLE:-manager}"
 worker_role="${CFG_WORKER_ROLE:-worker}"
 inspector_role="${CFG_INSPECTOR_ROLE:-inspector}"
@@ -557,11 +1030,64 @@ if ! [[ "$workers" =~ ^[0-9]+$ ]] || (( workers < 1 )); then
   exit 1
 fi
 
-copy_array_or_empty claude_args CFG_CLAUDE_ARGS
+default_args=()
+if is_truthy "${CFG_DEFAULT_ARGS_SET:-}"; then
+  copy_array_or_empty default_args CFG_DEFAULT_ARGS
+else
+  copy_array_or_empty default_args CFG_CLAUDE_ARGS
+fi
+copy_array_or_empty manager_args_raw CFG_MANAGER_ARGS
+copy_array_or_empty worker_args_raw CFG_WORKER_ARGS
+copy_array_or_empty inspector_args_raw CFG_INSPECTOR_ARGS
 copy_array_or_empty init_args CFG_INIT_ARGS
+copy_array_or_empty task_discovery_plan_globs CFG_TASK_DISCOVERY_PLAN_GLOBS
+copy_array_or_empty task_discovery_spec_globs CFG_TASK_DISCOVERY_SPEC_GLOBS
 copy_array_or_empty focus_files CFG_FOCUS_FILES
 copy_array_or_empty focus_docs CFG_FOCUS_DOCS
 copy_array_or_empty constraints CFG_CONSTRAINTS
+task_discovery_plan_suffix="${CFG_TASK_DISCOVERY_PLAN_SUFFIX:--implementation.md}"
+task_discovery_spec_suffix="${CFG_TASK_DISCOVERY_SPEC_SUFFIX:--design.md}"
+
+manager_command="${CFG_MANAGER_COMMAND:-$default_command}"
+manager_command="$(expand_home_path "$manager_command")"
+worker_command="${CFG_WORKER_COMMAND:-$default_command}"
+worker_command="$(expand_home_path "$worker_command")"
+inspector_command="${CFG_INSPECTOR_COMMAND:-$default_command}"
+inspector_command="$(expand_home_path "$inspector_command")"
+
+manager_args=()
+worker_args=()
+inspector_args=()
+if is_truthy "${CFG_MANAGER_ARGS_SET:-}"; then
+  copy_array_or_empty manager_args CFG_MANAGER_ARGS
+elif [[ -n "${CFG_MANAGER_COMMAND:-}" ]]; then
+  manager_args=()
+else
+  copy_array_or_empty manager_args default_args
+fi
+if is_truthy "${CFG_WORKER_ARGS_SET:-}"; then
+  copy_array_or_empty worker_args CFG_WORKER_ARGS
+elif [[ -n "${CFG_WORKER_COMMAND:-}" ]]; then
+  worker_args=()
+else
+  copy_array_or_empty worker_args default_args
+fi
+if is_truthy "${CFG_INSPECTOR_ARGS_SET:-}"; then
+  copy_array_or_empty inspector_args CFG_INSPECTOR_ARGS
+elif [[ -n "${CFG_INSPECTOR_COMMAND:-}" ]]; then
+  inspector_args=()
+else
+  copy_array_or_empty inspector_args default_args
+fi
+
+task_file=""
+task_source_kind=""
+task_source_path=""
+task_supporting_spec_path=""
+task_source_root=""
+
+resolve_task_sources "$project_dir" "$task_file_override" "$default_task_file" "$detected_repo_root"
+task_file="$task_source_path"
 
 if (( ${#init_args[@]} == 0 )); then
   init_args=(--refresh-roles)
@@ -629,9 +1155,21 @@ if (( worktree_enabled == 1 )); then
 fi
 mkdir -p "$quickstart_dir"
 
-claude_launch_command="$(shell_join "$claude_command")"
-if (( ${#claude_args[@]} > 0 )); then
-  claude_launch_command="$(shell_join "$claude_command" "${claude_args[@]}")"
+default_launch_command="$(shell_join "$default_command")"
+if (( ${#default_args[@]} > 0 )); then
+  default_launch_command="$(shell_join "$default_command" "${default_args[@]}")"
+fi
+manager_launch_command="$(shell_join "$manager_command")"
+if (( ${#manager_args[@]} > 0 )); then
+  manager_launch_command="$(shell_join "$manager_command" "${manager_args[@]}")"
+fi
+worker_launch_command="$(shell_join "$worker_command")"
+if (( ${#worker_args[@]} > 0 )); then
+  worker_launch_command="$(shell_join "$worker_command" "${worker_args[@]}")"
+fi
+inspector_launch_command="$(shell_join "$inspector_command")"
+if (( ${#inspector_args[@]} > 0 )); then
+  inspector_launch_command="$(shell_join "$inspector_command" "${inspector_args[@]}")"
 fi
 inspector_prompt_source="$source_project_dir/.squad/prompts/inspector.md"
 
@@ -642,6 +1180,9 @@ terminal_map_file="$quickstart_dir/generated-terminal-map.md"
 
 pane_labels=("$manager_role")
 pane_commands=("/squad $manager_role")
+pane_launch_commands=("$manager_launch_command")
+pane_exec_commands=("$manager_command")
+pane_launch_display=("$manager_launch_command")
 for ((i = 1; i <= workers; i++)); do
   if (( i == 1 )); then
     pane_labels+=("$worker_role")
@@ -650,9 +1191,27 @@ for ((i = 1; i <= workers; i++)); do
     pane_labels+=("${worker_role}-${i}")
     pane_commands+=("/squad $worker_role ${worker_role}-${i}")
   fi
+  pane_launch_commands+=("$worker_launch_command")
+  pane_exec_commands+=("$worker_command")
+  pane_launch_display+=("$worker_launch_command")
 done
 pane_labels+=("$inspector_role")
 pane_commands+=("/squad $inspector_role")
+pane_launch_commands+=("$inspector_launch_command")
+pane_exec_commands+=("$inspector_command")
+pane_launch_display+=("$inspector_launch_command")
+
+unique_items=()
+for role_command in "$manager_command" "$worker_command" "$inspector_command"; do
+  if platform="$(platform_for_command "$role_command" 2>/dev/null)"; then
+    add_unique_item "$platform" unique_items
+  fi
+done
+setup_platforms=("${unique_items[@]}")
+setup_platforms_display="none"
+if (( ${#setup_platforms[@]} > 0 )); then
+  setup_platforms_display="$(join_with_comma_space "${setup_platforms[@]}")"
+fi
 
 build_manager_prompt "$prompt_file" "$project_name" "$workspace_dir" "$task_file"
 build_inspector_prompt "$inspector_prompt_file" "$project_name" "$workspace_dir" "$task_file" "$inspector_prompt_source"
@@ -671,14 +1230,28 @@ if (( dry_run == 1 )); then
 fi
 
 require_cmd squad
-require_cmd "$claude_command"
+unique_commands=()
+for role_command in "$manager_command" "$worker_command" "$inspector_command"; do
+  add_unique_item "$role_command" unique_commands
+done
+for required_command in "${unique_commands[@]}"; do
+  require_cmd "$required_command"
+done
 require_cmd tmux
 
 if (( no_setup == 0 )); then
-  echo "[1/6] Refreshing Claude /squad command"
-  squad setup claude
+  if (( ${#setup_platforms[@]} == 0 )); then
+    echo "[1/6] No supported squad client platforms detected; skipping squad setup"
+  else
+    echo "[1/6] Refreshing /squad command for: $setup_platforms_display"
+    for platform in "${setup_platforms[@]}"; do
+      squad setup "$platform"
+    done
+  fi
 else
-  echo "[1/6] Skipping squad setup claude (--no-setup)"
+  setup_platforms=()
+  setup_platforms_display=""
+  echo "[1/6] Skipping squad setup (--no-setup)"
 fi
 
 echo "[2/6] Initializing squad workspace"
@@ -707,9 +1280,10 @@ if tmux has-session -t "$session_name" 2>/dev/null; then
 fi
 
 echo "[3/6] Creating tmux session"
-start_cmd="cd $(shell_escape "$workspace_dir") && exec $claude_launch_command"
+start_cmd="cd $(shell_escape "$workspace_dir") && exec ${pane_launch_commands[0]}"
 tmux new-session -d -s "$session_name" -n squad "$start_cmd"
 for ((i = 1; i < ${#pane_labels[@]}; i++)); do
+  start_cmd="cd $(shell_escape "$workspace_dir") && exec ${pane_launch_commands[$i]}"
   tmux split-window -t "$session_name":0 "$start_cmd"
 done
 tmux select-layout -t "$session_name":0 tiled
@@ -718,17 +1292,28 @@ for i in "${!pane_labels[@]}"; do
   tmux select-pane -t "$session_name":0."$i" -T "${pane_labels[$i]}"
 done
 
-pane_command_aliases=()
-while IFS= read -r alias; do
-  pane_command_aliases+=("$alias")
-done < <(pane_command_candidates "$claude_command")
 for i in "${!pane_labels[@]}"; do
+  pane_command_aliases=()
+  while IFS= read -r alias; do
+    pane_command_aliases+=("$alias")
+  done < <(pane_command_candidates "${pane_exec_commands[$i]}")
   wait_for_pane_command "$session_name":0."$i" 30 "${pane_command_aliases[@]}"
+  wait_for_pane_ready "$session_name":0."$i" 30
 done
 
 echo "[4/6] Sending squad commands"
 for i in "${!pane_commands[@]}"; do
   send_tmux_text "$session_name":0."$i" "${pane_commands[$i]}"
+done
+
+for attempt in 1 2 3; do
+  if (( "$(current_agent_count "$workspace_dir")" >= ${#pane_commands[@]} )); then
+    break
+  fi
+  sleep 2
+  for i in "${!pane_commands[@]}"; do
+    resubmit_pending_squad_command_if_needed "$session_name":0."$i" "${pane_commands[$i]}" || true
+  done
 done
 
 echo "[5/6] Waiting for agents to join squad"
