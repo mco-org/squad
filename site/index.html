@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>squad — multi-agent terminal collaboration</title>
+  <meta name="description" content="Lightweight Rust CLI for multi-AI-agent collaboration in the terminal. No server. No daemon. Just SQLite." />
+  <meta property="og:title" content="squad — multi-agent terminal collaboration" />
+  <meta property="og:description" content="Lightweight Rust CLI for multi-AI-agent collaboration in the terminal. No server. No daemon. Just SQLite." />
+  <meta property="og:image" content="assets/hero.png" />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect width='24' height='24' rx='4' fill='%230a0d14'/><text x='5' y='18' font-family='monospace' font-size='16' font-weight='700' fill='%23fb8c2c'>$</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:       #0a0d14;
+      --bg-deep:  #070910;
+      --panel:    #10141d;
+      --panel-2:  #161b26;
+      --line:     #1f2632;
+      --line-2:   #2a3344;
+      --ink:      #d5d8df;
+      --ink-2:    #9aa0ab;
+      --ink-3:    #5a6273;
+      --orange:   #fb8c2c;
+      --orange-d: #f97316;
+      --orange-s: rgba(251,140,44,.12);
+      --green:    #4ade80;
+      --cyan:     #38bdf8;
+      --red:      #f87171;
+      --yellow:   #fbbf24;
+      --grid:     rgba(255,255,255,.025);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 14px;
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+    /* terminal grid background */
+    body::before {
+      content: '';
+      position: fixed; inset: 0; pointer-events: none; z-index: 0;
+      background-image:
+        linear-gradient(var(--grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(ellipse at top, black 40%, transparent 90%);
+      -webkit-mask-image: radial-gradient(ellipse at top, black 40%, transparent 90%);
+    }
+    a { color: inherit; text-decoration: none; }
+
+    .wrap { max-width: 1140px; margin: 0 auto; padding: 0 28px; position: relative; z-index: 1; }
+
+    section[id], header[id] { scroll-margin-top: 80px; }
+
+    /* ── Nav ─────────────────────────────────────────────── */
+    nav {
+      padding: 22px 0;
+      position: sticky; top: 0; z-index: 50;
+      background: color-mix(in srgb, var(--bg) 86%, transparent);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid transparent;
+      transition: border-color .25s;
+    }
+    nav.scrolled { border-bottom-color: var(--line); }
+    .nav-row {
+      display: flex; align-items: center; justify-content: space-between;
+      max-width: 1140px; margin: 0 auto; padding: 0 28px;
+    }
+    .brand {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700; font-size: 16px;
+      display: inline-flex; align-items: center; gap: 8px;
+      letter-spacing: -.01em;
+    }
+    .brand-prompt { color: var(--orange); }
+
+    .nav-links {
+      display: flex; gap: 24px; align-items: center;
+      font-size: 13px;
+    }
+    .nav-links a { color: var(--ink-2); transition: color .15s; }
+    .nav-links a:hover { color: var(--ink); }
+    .nav-gh {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 7px 14px;
+      border: 1px solid var(--line-2);
+      border-radius: 6px;
+      font-size: 12.5px;
+      color: var(--ink);
+      transition: border-color .2s, background .2s;
+    }
+    .nav-gh:hover { border-color: var(--orange); background: var(--orange-s); }
+
+    /* ── Hero ────────────────────────────────────────────── */
+    .hero { padding: 76px 0 64px; }
+
+    .badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 11.5px; padding: 5px 12px;
+      border: 1px solid var(--line-2); border-radius: 999px;
+      color: var(--ink-2);
+      margin-bottom: 36px;
+    }
+    .badge-dot {
+      width: 6px; height: 6px; border-radius: 50%; background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
+    @keyframes blink { 50% { opacity: 0 } }
+
+    h1.wordmark {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: clamp(72px, 14vw, 168px);
+      line-height: .9;
+      letter-spacing: -.04em;
+      color: var(--orange);
+      margin-bottom: 22px;
+      text-shadow: 0 0 80px rgba(251,140,44,.15);
+    }
+    h1.wordmark::after {
+      content: '_';
+      color: var(--orange);
+      animation: blink 1.1s steps(2) infinite;
+      margin-left: 6px;
+    }
+
+    .tagline {
+      font-family: 'Inter', sans-serif;
+      font-size: clamp(20px, 2.2vw, 26px);
+      font-weight: 400;
+      color: var(--ink);
+      line-height: 1.35;
+      max-width: 620px;
+      letter-spacing: -.01em;
+      margin-bottom: 14px;
+    }
+    .tagline em {
+      font-style: normal;
+      color: var(--orange);
+    }
+    .sub {
+      font-family: 'Inter', sans-serif;
+      font-size: 15px;
+      color: var(--ink-2);
+      max-width: 520px;
+      line-height: 1.6;
+      margin-bottom: 36px;
+    }
+
+    /* ── Install pill ────────────────────────────────────── */
+    .install-pill {
+      display: inline-flex; align-items: center; gap: 14px;
+      background: var(--panel);
+      border: 1px solid var(--line-2);
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-size: 13.5px;
+      transition: border-color .2s, background .2s;
+    }
+    .install-pill:hover { border-color: var(--orange); }
+    .install-pill .pp { color: var(--orange); }
+    .install-pill .cmd { color: var(--ink); user-select: all; }
+    .install-pill .copy {
+      font-size: 11.5px; color: var(--ink-3);
+      padding: 4px 10px;
+      border-radius: 5px;
+      background: var(--panel-2);
+      cursor: pointer; border: none; font-family: inherit;
+      transition: color .15s, background .15s;
+    }
+    .install-pill .copy:hover { color: var(--ink); background: var(--line); }
+    .install-pill .copy.ok { color: var(--green); }
+
+    .hero-actions {
+      display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+      margin-top: 6px;
+    }
+    .alt-link {
+      font-size: 13px;
+      color: var(--ink-2);
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 12px 0;
+      transition: color .15s;
+    }
+    .alt-link:hover { color: var(--orange); }
+
+    /* ── Hero image ──────────────────────────────────────── */
+    .hero-art {
+      margin-top: 80px;
+      border: 1px solid var(--line-2);
+      border-radius: 14px;
+      overflow: hidden;
+      background: var(--bg-deep);
+      box-shadow:
+        0 1px 0 rgba(255,255,255,.04) inset,
+        0 40px 80px -40px rgba(0,0,0,.6),
+        0 20px 40px -30px rgba(251,140,44,.08);
+      position: relative;
+    }
+    .hero-art-chrome {
+      display: flex; align-items: center; gap: 7px;
+      padding: 10px 14px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+    .hero-art-chrome .lights {
+      display: flex; gap: 6px;
+    }
+    .hero-art-chrome .lights span {
+      width: 11px; height: 11px; border-radius: 50%; display: block;
+    }
+    .hero-art-chrome .r { background: var(--red); }
+    .hero-art-chrome .y { background: var(--yellow); }
+    .hero-art-chrome .g { background: var(--green); }
+    .hero-art-chrome .ttl {
+      flex: 1; text-align: center;
+      font-size: 11px; color: var(--ink-3);
+      letter-spacing: .04em;
+    }
+    .hero-art img {
+      display: block; width: 100%; height: auto;
+    }
+
+    /* ── Section ─────────────────────────────────────────── */
+    section { padding: 100px 0; position: relative; }
+    .sec-label {
+      display: inline-flex; align-items: center; gap: 10px;
+      font-size: 11.5px; color: var(--orange);
+      margin-bottom: 18px;
+      letter-spacing: .04em;
+    }
+    .sec-label::before {
+      content: ''; width: 18px; height: 1px; background: var(--orange);
+    }
+    .sec-title {
+      font-family: 'Inter', sans-serif;
+      font-weight: 500;
+      font-size: clamp(28px, 3.4vw, 42px);
+      line-height: 1.15;
+      letter-spacing: -.018em;
+      max-width: 720px;
+      margin-bottom: 14px;
+    }
+    .sec-title .accent { color: var(--orange); }
+    .sec-sub {
+      font-family: 'Inter', sans-serif;
+      font-size: 15.5px;
+      color: var(--ink-2);
+      max-width: 580px;
+      line-height: 1.6;
+    }
+
+    /* ── Features ────────────────────────────────────────── */
+    .feats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      margin-top: 56px;
+    }
+    .feat {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 28px 26px;
+      transition: border-color .25s, transform .25s;
+      position: relative;
+    }
+    .feat:hover { border-color: var(--line-2); transform: translateY(-2px); }
+    .feat-tag {
+      font-size: 11px; color: var(--orange);
+      letter-spacing: .06em;
+      margin-bottom: 22px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .feat-num {
+      font-size: 10.5px; color: var(--ink-3);
+      letter-spacing: .1em;
+    }
+    .feat-title {
+      font-family: 'Inter', sans-serif;
+      font-weight: 500;
+      font-size: 19px;
+      letter-spacing: -.015em;
+      color: var(--ink);
+      margin-bottom: 10px;
+    }
+    .feat-desc {
+      font-family: 'Inter', sans-serif;
+      font-size: 13.5px;
+      color: var(--ink-2);
+      line-height: 1.55;
+    }
+    .feat-code {
+      font-size: 11.5px;
+      color: var(--cyan);
+      background: var(--bg-deep);
+      padding: 1px 6px;
+      border-radius: 3px;
+      border: 1px solid var(--line);
+    }
+
+    /* ── Flow ────────────────────────────────────────────── */
+    .flow-wrap {
+      margin-top: 60px;
+      background: var(--bg-deep);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 36px 28px;
+      overflow: hidden;
+    }
+    .flow-art {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12.5px;
+      line-height: 1.6;
+      color: var(--ink-2);
+      white-space: pre;
+      overflow-x: auto;
+      padding: 8px 0;
+    }
+    .flow-art .t1 { color: var(--orange); }
+    .flow-art .t2 { color: var(--cyan); }
+    .flow-art .t3 { color: var(--green); }
+    .flow-art .arrow { color: var(--orange); }
+    .flow-art .dim { color: var(--ink-3); }
+
+    /* ── Platforms ───────────────────────────────────────── */
+    .plats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-top: 56px;
+    }
+    .plat {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 24px 22px;
+      transition: border-color .2s, background .2s;
+    }
+    .plat:hover { border-color: var(--orange); background: var(--orange-s); }
+    .plat-name {
+      font-family: 'Inter', sans-serif;
+      font-weight: 500;
+      font-size: 15px;
+      letter-spacing: -.01em;
+      color: var(--ink);
+      margin-bottom: 4px;
+    }
+    .plat-cmd {
+      font-size: 11.5px;
+      color: var(--orange);
+    }
+    .plat-path {
+      font-size: 11px;
+      color: var(--ink-3);
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+      word-break: break-all;
+    }
+
+    /* ── Steps / Install ─────────────────────────────────── */
+    .steps {
+      display: grid;
+      gap: 14px;
+      margin-top: 56px;
+    }
+    .step {
+      display: grid;
+      grid-template-columns: 60px 1fr;
+      gap: 24px;
+      align-items: start;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 22px 26px;
+    }
+    .step-n {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--orange);
+      letter-spacing: -.02em;
+    }
+    .step-h {
+      font-family: 'Inter', sans-serif;
+      font-weight: 500;
+      font-size: 16px;
+      color: var(--ink);
+      margin-bottom: 4px;
+    }
+    .step-desc {
+      font-family: 'Inter', sans-serif;
+      font-size: 13.5px;
+      color: var(--ink-2);
+      margin-bottom: 14px;
+    }
+    .step-code {
+      background: var(--bg-deep);
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 12px 16px;
+      font-size: 13px;
+      display: flex; align-items: center; gap: 12px;
+      justify-content: space-between;
+    }
+    .step-code .lines { flex: 1; min-width: 0; overflow-x: auto; }
+    .step-code .ln { display: block; white-space: nowrap; }
+    .step-code .ln + .ln { margin-top: 4px; }
+    .step-code .pp { color: var(--orange); margin-right: 10px; }
+    .step-code .cm { color: var(--ink); }
+    .step-code .copy {
+      font-size: 11.5px; color: var(--ink-3);
+      padding: 4px 10px;
+      border-radius: 5px;
+      background: var(--panel-2);
+      cursor: pointer; border: none; font-family: inherit;
+      transition: color .15s, background .15s;
+      flex-shrink: 0;
+    }
+    .step-code .copy:hover { color: var(--ink); background: var(--line); }
+    .step-code .copy.ok { color: var(--green); }
+
+    /* ── Commands table ──────────────────────────────────── */
+    .cmds {
+      margin-top: 56px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      background: var(--panel);
+    }
+    .cmd-group-h {
+      padding: 14px 24px;
+      background: var(--bg-deep);
+      font-size: 10.5px;
+      letter-spacing: .14em;
+      color: var(--orange);
+      border-bottom: 1px solid var(--line);
+      border-top: 1px solid var(--line);
+    }
+    .cmd-group-h:first-child { border-top: none; }
+    .cmd-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
+      gap: 24px;
+      padding: 14px 24px;
+      border-bottom: 1px solid var(--line);
+      align-items: baseline;
+    }
+    .cmd-row:last-child { border-bottom: none; }
+    .cmd-row:hover { background: var(--panel-2); }
+    .cmd-c {
+      font-size: 12.5px;
+      color: var(--cyan);
+      overflow-x: auto;
+      white-space: pre;
+    }
+    .cmd-d {
+      font-family: 'Inter', sans-serif;
+      font-size: 13.5px;
+      color: var(--ink-2);
+      line-height: 1.55;
+    }
+    .cmd-d code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--cyan);
+      background: var(--bg-deep);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+
+    /* ── Footer ──────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--line);
+      padding: 56px 0;
+      margin-top: 80px;
+    }
+    .foot {
+      display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: 20px;
+    }
+    .foot-brand {
+      font-size: 13px; color: var(--ink-2);
+    }
+    .foot-brand b { color: var(--orange); font-weight: 700; }
+    .foot-links {
+      display: flex; gap: 24px;
+      font-size: 12.5px;
+    }
+    .foot-links a { color: var(--ink-3); transition: color .15s; }
+    .foot-links a:hover { color: var(--orange); }
+    .foot-note {
+      font-size: 12px; color: var(--ink-3);
+      margin-top: 16px;
+      flex-basis: 100%;
+    }
+
+    /* ── Responsive ──────────────────────────────────────── */
+    @media (max-width: 780px) {
+      .feats { grid-template-columns: 1fr; }
+      .plats { grid-template-columns: 1fr 1fr; }
+      .cmd-row { grid-template-columns: 1fr; gap: 4px; }
+      .nav-links a:not(.nav-gh) { display: none; }
+      .step { grid-template-columns: 1fr; gap: 8px; }
+      .step-n { font-size: 18px; }
+    }
+  </style>
+</head>
+<body>
+
+  <nav id="nav">
+    <div class="nav-row">
+      <a href="#" class="brand">
+        <span class="brand-prompt">$</span>squad
+      </a>
+      <div class="nav-links">
+        <a href="#how">how it works</a>
+        <a href="#install">install</a>
+        <a href="#commands">commands</a>
+        <a href="https://github.com/mco-org/squad" target="_blank" rel="noreferrer" class="nav-gh">GitHub →</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ── HERO ─────────────────────────────────────────────── -->
+  <header class="hero">
+    <div class="wrap">
+      <div class="badge">
+        <span class="badge-dot"></span>
+        <span>v0.x · MIT licensed · Rust 1.77+</span>
+      </div>
+
+      <h1 class="wordmark">squad</h1>
+
+      <p class="tagline">
+        Multi-AI-agent collaboration<br />
+        <em>in the terminal.</em>
+      </p>
+      <p class="sub">
+        A lightweight Rust CLI that lets Claude, Gemini, Codex, and OpenCode coordinate through a shared SQLite file. No server. No daemon. Just one slash command.
+      </p>
+
+      <div class="hero-actions">
+        <div class="install-pill">
+          <span class="pp">$</span>
+          <span class="cmd" id="installCmd">brew install mco-org/tap/squad</span>
+          <button class="copy" id="copyInstall">copy</button>
+        </div>
+        <a href="https://github.com/mco-org/squad" target="_blank" rel="noreferrer" class="alt-link">
+          View source ↗
+        </a>
+      </div>
+
+      <div class="hero-art">
+        <div class="hero-art-chrome">
+          <div class="lights">
+            <span class="r"></span><span class="y"></span><span class="g"></span>
+          </div>
+          <div class="ttl">squad — multi-agent collaboration via SQLite</div>
+          <div style="width:44px"></div>
+        </div>
+        <img src="assets/hero.png" alt="squad — multiple terminal agents coordinating through a central SQLite database" />
+      </div>
+    </div>
+  </header>
+
+  <!-- ── WHY / FEATURES ───────────────────────────────────── -->
+  <section id="why">
+    <div class="wrap">
+      <div class="sec-label">// why squad</div>
+      <h2 class="sec-title">Coordinate intelligence,<br /><span class="accent">not infrastructure.</span></h2>
+      <p class="sec-sub">Most multi-agent systems demand a message broker, a runtime, an orchestrator. squad is six characters in your shell and a file on disk.</p>
+
+      <div class="feats">
+        <div class="feat">
+          <div class="feat-tag">/* core */<span class="feat-num">01</span></div>
+          <div class="feat-title">No daemon. No server.</div>
+          <p class="feat-desc">Every command is a one-shot read or write to a local SQLite file. Nothing runs in the background. Nothing to monitor.</p>
+        </div>
+        <div class="feat">
+          <div class="feat-tag">/* protocol */<span class="feat-num">02</span></div>
+          <div class="feat-title">One slash command.</div>
+          <p class="feat-desc">Run <span class="feat-code">/squad manager</span> in any CLI. squad installs the slash command for every supported AI tool.</p>
+        </div>
+        <div class="feat">
+          <div class="feat-tag">/* tasks */<span class="feat-num">03</span></div>
+          <div class="feat-title">Real task assignment.</div>
+          <p class="feat-desc">Create, ack, complete, requeue. Atomic ID auto-suffix means simultaneous joins never collide.</p>
+        </div>
+        <div class="feat">
+          <div class="feat-tag">/* roles */<span class="feat-num">04</span></div>
+          <div class="feat-title">Manager · worker · inspector.</div>
+          <p class="feat-desc">Three built-in roles. Add your own with a markdown file in <span class="feat-code">.squad/roles/</span>.</p>
+        </div>
+        <div class="feat">
+          <div class="feat-tag">/* speed */<span class="feat-num">05</span></div>
+          <div class="feat-title">Fast and minimal.</div>
+          <p class="feat-desc">Written in Rust. A single static binary. Sub-millisecond send and receive.</p>
+        </div>
+        <div class="feat">
+          <div class="feat-tag">/* open */<span class="feat-num">06</span></div>
+          <div class="feat-title">Inspectable, hackable, MIT.</div>
+          <p class="feat-desc">Open <span class="feat-code">.squad/messages.db</span> in any SQLite client. That's the entire protocol.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── HOW IT WORKS ─────────────────────────────────────── -->
+  <section id="how">
+    <div class="wrap">
+      <div class="sec-label">// how it works</div>
+      <h2 class="sec-title">Three terminals.<br /><span class="accent">One SQLite file.</span></h2>
+      <p class="sec-sub">Each agent runs in its own terminal. All inter-agent messages flow through <span style="color:var(--cyan)">.squad/messages.db</span>. No network layer.</p>
+
+      <div class="flow-wrap">
+<pre class="flow-art"><span class="t1">Terminal 1 (manager)</span>          <span class="t2">Terminal 2 (worker)</span>          <span class="t3">Terminal 3 (worker-2)</span>
+┌─────────────────────┐      ┌─────────────────────┐      ┌─────────────────────┐
+│ <span class="t1">/squad manager</span>      │      │ <span class="t2">/squad worker</span>       │      │ <span class="t3">/squad worker</span>       │
+│                     │      │ (auto-ID: worker)   │      │ (auto-ID: worker-2) │
+│                     │      │                     │      │                     │
+│ squad task create   │<span class="arrow">─────></span>│ squad receive worker│      │                     │
+│   manager worker    │      │                     │      │                     │
+│   "task-a"          │      │                     │      │                     │
+│                     │      │                     │      │                     │
+│ squad task create   │<span class="arrow">──────────────────────────────────></span>│ squad receive       │
+│   manager worker-2  │      │                     │      │                     │
+│   "task-b"          │      │                     │      │                     │
+│                     │      │                     │      │                     │
+│ squad receive       │<span class="arrow"><─────</span>│ squad task complete │      │                     │
+│   manager           │      │   worker &lt;task-id&gt;  │      │                     │
+│                     │      │   "done A"          │      │                     │
+│                     │      │                     │      │                     │
+│                     │<span class="arrow"><──────────────────────────────────</span>│ squad task complete │
+│                     │      │                     │      │   worker-2 &lt;task-id&gt;│
+│                     │      │                     │      │   "done B"          │
+└─────────────────────┘      └─────────────────────┘      └─────────────────────┘
+                                          │
+                                          ▼
+                              <span class="dim">.squad/messages.db</span></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── PLATFORMS ────────────────────────────────────────── -->
+  <section id="platforms">
+    <div class="wrap">
+      <div class="sec-label">// platforms</div>
+      <h2 class="sec-title">Works with every<br /><span class="accent">major AI CLI.</span></h2>
+      <p class="sec-sub">One <code style="font-size:13px;color:var(--cyan)">squad setup</code> installs the slash command into all detected tools.</p>
+
+      <div class="plats">
+        <div class="plat">
+          <div class="plat-name">Claude Code</div>
+          <div class="plat-cmd">/squad</div>
+          <div class="plat-path">~/.claude/commands/squad.md</div>
+        </div>
+        <div class="plat">
+          <div class="plat-name">Gemini CLI</div>
+          <div class="plat-cmd">/squad</div>
+          <div class="plat-path">~/.gemini/commands/squad.toml</div>
+        </div>
+        <div class="plat">
+          <div class="plat-name">Codex CLI</div>
+          <div class="plat-cmd">$squad</div>
+          <div class="plat-path">~/.codex/skills/squad/SKILL.md</div>
+        </div>
+        <div class="plat">
+          <div class="plat-name">OpenCode</div>
+          <div class="plat-cmd">/squad</div>
+          <div class="plat-path">~/.config/opencode/commands/squad.md</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── INSTALL ──────────────────────────────────────────── -->
+  <section id="install">
+    <div class="wrap">
+      <div class="sec-label">// install</div>
+      <h2 class="sec-title">Up and running<br /><span class="accent">in three commands.</span></h2>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-n">01</div>
+          <div>
+            <div class="step-h">Install the binary</div>
+            <div class="step-desc">Homebrew on macOS, prebuilt binaries for Linux and Windows, or build from source.</div>
+            <div class="step-code">
+              <div class="lines">
+                <span class="ln"><span class="pp">$</span><span class="cm">brew install mco-org/tap/squad</span></span>
+                <span class="ln"><span class="pp">$</span><span class="cm">cargo install --git https://github.com/mco-org/squad.git</span></span>
+              </div>
+              <button class="copy" data-copy="brew install mco-org/tap/squad">copy</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-n">02</div>
+          <div>
+            <div class="step-h">Wire up your AI tools</div>
+            <div class="step-desc"><code style="color:var(--cyan);font-size:13px">squad setup</code> auto-detects Claude, Gemini, Codex, and OpenCode. <code style="color:var(--cyan);font-size:13px">squad init</code> initializes the workspace.</div>
+            <div class="step-code">
+              <div class="lines">
+                <span class="ln"><span class="pp">$</span><span class="cm">squad setup</span></span>
+                <span class="ln"><span class="pp">$</span><span class="cm">squad init</span></span>
+              </div>
+              <button class="copy" data-copy="squad setup && squad init">copy</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-n">03</div>
+          <div>
+            <div class="step-h">Launch agents in separate terminals</div>
+            <div class="step-desc">One slash command per role. Agents auto-suffix on conflict (<code style="color:var(--cyan);font-size:13px">worker</code>, <code style="color:var(--cyan);font-size:13px">worker-2</code>…).</div>
+            <div class="step-code">
+              <div class="lines">
+                <span class="ln"><span class="pp">›</span><span class="cm">/squad manager</span></span>
+                <span class="ln"><span class="pp">›</span><span class="cm">/squad worker</span></span>
+                <span class="ln"><span class="pp">›</span><span class="cm">/squad inspector</span></span>
+              </div>
+              <button class="copy" data-copy="/squad manager">copy</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── COMMANDS ─────────────────────────────────────────── -->
+  <section id="commands">
+    <div class="wrap">
+      <div class="sec-label">// reference</div>
+      <h2 class="sec-title">Every command<br /><span class="accent">squad understands.</span></h2>
+
+      <div class="cmds">
+        <div class="cmd-group-h">// workspace</div>
+        <div class="cmd-row"><span class="cmd-c">squad init [--refresh-roles]</span><span class="cmd-d">Create <code>.squad/</code>, update <code>.gitignore</code>, append squad guidance to <code>CLAUDE.md</code> / <code>AGENTS.md</code> / <code>GEMINI.md</code>.</span></div>
+        <div class="cmd-row"><span class="cmd-c">squad setup [platform]</span><span class="cmd-d">Install <code>/squad</code> slash command for all detected AI tools, or a specific one.</span></div>
+        <div class="cmd-row"><span class="cmd-c">squad clean</span><span class="cmd-d">Clear all agent state from the workspace.</span></div>
+
+        <div class="cmd-group-h">// agents</div>
+        <div class="cmd-row"><span class="cmd-c">squad join &lt;id&gt; [--role &lt;r&gt;] [--client &lt;c&gt;]</span><span class="cmd-d">Join workspace as an agent. ID is auto-suffixed on conflict (worker → worker-2).</span></div>
+        <div class="cmd-row"><span class="cmd-c">squad leave &lt;id&gt;</span><span class="cmd-d">Archive agent, preserving any unread work.</span></div>
+        <div class="cmd-row"><span class="cmd-c">squad agents [--all] [--json]</span><span class="cmd-d">List online agents. <code>--json</code> exposes capability metadata.</span></div>
+
+        <div class="cmd-group-h">// messaging</div>
+        <div class="cmd-row"><span class="cmd-c">squad send &lt;from&gt; &lt;to&gt; &lt;msg&gt;</span><span class="cmd-d">Send a freeform note. Use <code>@all</code> to broadcast.</span></div>
+        <div class="cmd-row"><span class="cmd-c">squad receive &lt;id&gt; [--wait] [--timeout N]</span><span class="cmd-d">Check inbox. <code>--wait</code> blocks until a message arrives.</span></div>
+        <div class="cmd-row"><span class="cmd-c">squad pending</span><span class="cmd-d">Show all unread messages across the workspace.</span></div>
+        <div class="cmd-row"><span class="cmd-c">squad history [agent]</span><span class="cmd-d">Timestamped message history with optional filters.</span></div>
+
+        <div class="cmd-group-h">// tasks</div>
+        <div class="cmd-row"><span class="cmd-c">squad task create &lt;from&gt; &lt;to&gt; --title &lt;t&gt;</span><span class="cmd-d">Create a structured task assignment with optional body.</span></div>
+        <div class="cmd-row"><span class="cmd-c">squad task ack &lt;agent&gt; &lt;task-id&gt;</span><span class="cmd-d">Claim a queued task.</span></div>
+        <div class="cmd-row"><span class="cmd-c">squad task complete &lt;agent&gt; &lt;id&gt; --summary</span><span class="cmd-d">Mark a task done with a summary string.</span></div>
+        <div class="cmd-row"><span class="cmd-c">squad task requeue &lt;task-id&gt; [--to &lt;agent&gt;]</span><span class="cmd-d">Put a task back into the queue, optionally reassigning.</span></div>
+        <div class="cmd-row"><span class="cmd-c">squad task list [--agent] [--status]</span><span class="cmd-d">List tasks with optional filters.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── FOOTER ───────────────────────────────────────────── -->
+  <footer>
+    <div class="wrap">
+      <div class="foot">
+        <div class="foot-brand"><b>$</b>squad — coordinate intelligence, not infrastructure.</div>
+        <div class="foot-links">
+          <a href="https://github.com/mco-org/squad" target="_blank" rel="noreferrer">GitHub</a>
+          <a href="https://github.com/mco-org/squad/releases" target="_blank" rel="noreferrer">Releases</a>
+          <a href="https://github.com/mco-org/squad/blob/main/LICENSE" target="_blank" rel="noreferrer">MIT</a>
+          <a href="https://hivehq.dev/" target="_blank" rel="noreferrer">Hive ↗</a>
+        </div>
+        <div class="foot-note">
+          © 2026 mco-org · Written in Rust · For when you'd rather not run a daemon.
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    const nav = document.getElementById('nav');
+    const onScroll = () => nav.classList.toggle('scrolled', window.scrollY > 16);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+
+    document.querySelectorAll('.copy').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const txt = btn.dataset.copy || btn.previousElementSibling?.textContent?.trim() || '';
+        navigator.clipboard.writeText(txt).then(() => {
+          const orig = btn.textContent;
+          btn.textContent = 'copied ✓';
+          btn.classList.add('ok');
+          setTimeout(() => {
+            btn.textContent = orig;
+            btn.classList.remove('ok');
+          }, 1600);
+        });
+      });
+    });
+
+    const firstCopy = document.getElementById('copyInstall');
+    if (firstCopy) {
+      firstCopy.dataset.copy = document.getElementById('installCmd').textContent.trim();
+    }
+  </script>
+</body>
+</html>
